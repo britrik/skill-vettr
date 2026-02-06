@@ -32,8 +32,15 @@ export async function execSafe(
   }
 
   for (const arg of args) {
-    if (/[;&|`$(){}[\]<>\\]/.test(arg) && !arg.startsWith('-')) {
+    // Block shell metacharacters in all arguments (even flags)
+    // Note: execFile doesn't invoke a shell, so these wouldn't be interpreted,
+    // but we block them anyway as defense-in-depth and to catch malformed input
+    if (/[;&|`$(){}[\]<>]/.test(arg)) {
       throw new Error(`Argument contains shell metacharacters: "${arg.substring(0, 20)}"`);
+    }
+    // Block null bytes which could cause truncation issues
+    if (arg.includes('\0')) {
+      throw new Error('Argument contains null byte');
     }
   }
 

@@ -53,7 +53,7 @@ export class AstAnalyzer {
   }
 
   analyze(filePath: string, content: string, ext: string): Finding[] {
-    const isTs = ext === '.ts' || ext === '.mts';
+    const isTs = ext === '.ts' || ext === '.mts' || ext === '.cts';
     const lang = isTs ? this.tsLang : this.jsLang;
     const rules = isTs ? this.tsQueries : this.jsQueries;
 
@@ -95,7 +95,7 @@ export class AstAnalyzer {
 
   /** Extract network call URLs from AST (literal string args to fetch/axios/http). */
   extractNetworkCalls(filePath: string, content: string, ext: string): { url: string; line: number }[] {
-    const isTs = ext === '.ts' || ext === '.mts';
+    const isTs = ext === '.ts' || ext === '.mts' || ext === '.cts';
     const lang = isTs ? this.tsLang : this.jsLang;
 
     this.parser.setLanguage(lang);
