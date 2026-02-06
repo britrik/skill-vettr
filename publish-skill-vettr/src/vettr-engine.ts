@@ -17,14 +17,14 @@ import { MetadataAnalyzer } from './analyzers/metadata-analyzer.js';
 import { DependencyAnalyzer } from './analyzers/dependency-analyzer.js';
 import { sanitisePath, getAllowedRoots, truncateEvidence } from './utils/sanitise.js';
 
-const VERSION = '2.0.0';
+const VERSION = '2.0.1';
 
 const TEXT_EXTENSIONS = new Set([
-  '.ts', '.js', '.mjs', '.cjs', '.jsx', '.tsx',
+  '.ts', '.js', '.mjs', '.cjs', '.mts', '.cts', '.jsx', '.tsx',
   '.json', '.md', '.yaml', '.yml', '.txt',
 ]);
 
-const CODE_EXTENSIONS = new Set(['.ts', '.js', '.mjs', '.cjs', '.jsx', '.tsx']);
+const CODE_EXTENSIONS = new Set(['.ts', '.js', '.mjs', '.cjs', '.mts', '.cts', '.jsx', '.tsx']);
 
 const CATEGORY_WEIGHTS: Record<FindingCategory, number> = {
   PROMPT_INJECTION: 1.5,
@@ -135,8 +135,8 @@ export class VettrEngine {
         }
       }
 
-      // SKILL.md
-      if (file.endsWith('SKILL.md')) {
+      // SKILL.md (case-insensitive for Windows compatibility)
+      if (file.toLowerCase().endsWith('skill.md')) {
         manifest = this.parseSkillManifest(content, file, findings);
         const metaFindings = this.metadataAnalyzer.analyze(manifest, resolvedPath, this.config);
         findings.push(...metaFindings);
@@ -145,7 +145,7 @@ export class VettrEngine {
 
     const riskScore = this.calculateRiskScore(findings, networkCalls);
     const riskLevel = this.getRiskLevel(riskScore);
-    const checksumSha256 = await this.calculateChecksum(files, tools);
+    const checksumSha256 = await this.calculateChecksum(files, tools, resolvedPath);
 
     return {
       skillName: manifest.name || path.basename(resolvedPath),
@@ -168,9 +168,14 @@ export class VettrEngine {
     };
   }
 
-  private async collectFiles(dir: string, tools: ToolsInterface): Promise<string[]> {
+  private async collectFiles(
+    dir: string,
+    tools: ToolsInterface,
+    rootDir?: string,
+  ): Promise<string[]> {
     const results: string[] = [];
     const entries = await tools.readdir(dir);
+    const effectiveRoot = rootDir ?? dir;
 
     for (const entry of entries) {
       if (entry.startsWith('.')) continue;
@@ -179,9 +184,30 @@ export class VettrEngine {
       const fullPath = path.join(dir, entry);
 
       try {
-        const stats = await tools.stat(fullPath);
+        // Use lstat to detect symlinks without following them
+        const stats = await tools.lstat(fullPath);
+
+        // Skip symlinks entirely to prevent escape attacks
+        if (stats.isSymbolicLink()) {
+          continue;
+        }
+
+        // Verify path stays within root directory (defense in depth)
+        // Use case-insensitive comparison on Windows
+        const realPath = await tools.realpath(fullPath);
+        const realRoot = await tools.realpath(effectiveRoot);
+        const isWindows = process.platform === 'win32';
+        const normalizedRealPath = isWindows ? realPath.toLowerCase() : realPath;
+        const normalizedRealRoot = isWindows ? realRoot.toLowerCase() : realRoot;
+        if (
+          !normalizedRealPath.startsWith(normalizedRealRoot + path.sep) &&
+          normalizedRealPath !== normalizedRealRoot
+        ) {
+          continue;
+        }
+
         if (stats.isDirectory()) {
-          const subFiles = await this.collectFiles(fullPath, tools);
+          const subFiles = await this.collectFiles(fullPath, tools, effectiveRoot);
           results.push(...subFiles);
         } else if (stats.isFile()) {
           results.push(fullPath);
@@ -304,14 +330,22 @@ export class VettrEngine {
     });
   }
 
-  private async calculateChecksum(files: string[], tools: ToolsInterface): Promise<string> {
+  private async calculateChecksum(
+    files: string[],
+    tools: ToolsInterface,
+    rootDir: string,
+  ): Promise<string> {
     const hash = crypto.createHash('sha256');
-    const sortedFiles = [...files].sort();
+    // Use relative paths for stable checksums across machines
+    const relativeFiles = files.map((f) => path.relative(rootDir, f));
+    const sortedFiles = [...relativeFiles].sort();
 
-    for (const file of sortedFiles) {
+    for (const relFile of sortedFiles) {
+      const absFile = path.join(rootDir, relFile);
       try {
-        const content = await tools.readFile(file);
-        hash.update(file);
+        const content = await tools.readFile(absFile);
+        // Hash relative path (not absolute) for machine-independent checksums
+        hash.update(relFile);
         hash.update(content);
       } catch {
         // Skip unreadable files

@@ -73,7 +73,9 @@ export interface VettingConfig {
 export interface ToolsInterface {
   readFile(path: string): Promise<string>;
   writeFile(path: string, content: string): Promise<void>;
-  stat(path: string): Promise<{ isDirectory(): boolean; isFile(): boolean }>;
+  stat(path: string): Promise<{ isDirectory(): boolean; isFile(): boolean; isSymbolicLink(): boolean }>;
+  lstat(path: string): Promise<{ isDirectory(): boolean; isFile(): boolean; isSymbolicLink(): boolean }>;
+  realpath(path: string): Promise<string>;
   readdir(path: string): Promise<string[]>;
   mkdtemp(prefix: string): Promise<string>;
   rm(path: string, opts?: { recursive?: boolean; force?: boolean }): Promise<void>;
