@@ -207,7 +207,7 @@ export default class SkillVettr implements OpenClawSkill {
       `│  Network Calls:       ${report.metadata.networkCalls.length}`,
       `│  Files Analysed:      ${report.metadata.fileCount}`,
       `│  Total Lines:         ${report.metadata.totalLines}`,
-      `│  Checksum (SHA-256):  ${report.metadata.checksumSha256?.substring(0, 16)}...`,
+      `│  Checksum (SHA-256):  ${report.metadata.checksumSha256 ? report.metadata.checksumSha256.substring(0, 16) + '...' : 'N/A'}`,
       `└─────────────────────────────────────────────────────────────`,
       ``,
     ];
