@@ -93,7 +93,7 @@ export class AstAnalyzer {
     return findings;
   }
 
-  /** Extract network call URLs from AST (literal string args to fetch/axios/http). */
+  /** Extract network call URLs from AST. Only detects fetch() with literal URL strings. */
   extractNetworkCalls(filePath: string, content: string, ext: string): { url: string; line: number }[] {
     const isTs = ext === '.ts' || ext === '.mts' || ext === '.cts';
     const lang = isTs ? this.tsLang : this.jsLang;
@@ -105,7 +105,8 @@ export class AstAnalyzer {
     const calls: { url: string; line: number }[] = [];
 
     try {
-      // Match fetch('url'), axios.get('url'), http.get('url') etc.
+      // Match fetch('url') with literal string argument only
+      // Note: axios, http module, and dynamic URLs are NOT detected
       const query = new Query(lang, NETWORK_CALL_QUERY);
       const matches = query.matches(tree.rootNode);
       for (const match of matches) {
