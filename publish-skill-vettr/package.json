@@ -1,11 +1,10 @@
 {
   "name": "@openclaw/skill-vettr",
-  "version": "2.0.1",
+  "version": "2.0.0",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch",
     "test": "node --test dist/__tests__/**/*.test.js"
   },
   "dependencies": {

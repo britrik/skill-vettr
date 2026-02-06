@@ -48,11 +48,7 @@ declare module '@openclaw/sdk' {
     writeFile(path: string, content: string): Promise<void>;
     stat(
       path: string,
-    ): Promise<{ isDirectory(): boolean; isFile(): boolean; isSymbolicLink(): boolean }>;
-    lstat(
-      path: string,
-    ): Promise<{ isDirectory(): boolean; isFile(): boolean; isSymbolicLink(): boolean }>;
-    realpath(path: string): Promise<string>;
+    ): Promise<{ isDirectory(): boolean; isFile(): boolean }>;
     readdir(path: string): Promise<string[]>;
     mkdtemp(prefix: string): Promise<string>;
     rm(
