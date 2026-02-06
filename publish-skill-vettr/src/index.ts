@@ -118,7 +118,8 @@ export default class SkillVettr implements OpenClawSkill {
 
       try {
         const sanitisedSlug = sanitiseSlug(slug);
-        tempDir = path.join(os.tmpdir(), generateSecureTempName());
+        // Use mkdtemp to create directory (clawhub CLI may not auto-create output dir)
+        tempDir = await ctx.tools.mkdtemp(path.join(os.tmpdir(), 'skill-vettr-'));
 
         ctx.ui.showProgress(`Fetching "${sanitisedSlug}" from ClawHub...`);
 
