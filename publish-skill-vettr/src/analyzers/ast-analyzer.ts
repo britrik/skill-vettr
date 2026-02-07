@@ -104,10 +104,10 @@ export class AstAnalyzer {
 
     const calls: { url: string; line: number }[] = [];
 
+    // Match fetch('url') with literal string argument only
+    // Note: axios, http module, and dynamic URLs are NOT detected
+    const query = new Query(lang, NETWORK_CALL_QUERY);
     try {
-      // Match fetch('url') with literal string argument only
-      // Note: axios, http module, and dynamic URLs are NOT detected
-      const query = new Query(lang, NETWORK_CALL_QUERY);
       const matches = query.matches(tree.rootNode);
       for (const match of matches) {
         const urlCapture = match.captures.find((c) => c.name === 'url');
@@ -120,8 +120,8 @@ export class AstAnalyzer {
           calls.push({ url, line: urlCapture.node.startPosition.row + 1 });
         }
       }
-      query.delete();
     } finally {
+      query.delete();
       tree.delete();
     }
 
