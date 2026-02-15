@@ -11,6 +11,8 @@ npm run build
 npm test
 ```
 
+> ⚠️ `npm install` runs dependency lifecycle scripts (tree-sitter includes native builds). For stronger isolation, install inside a container or use `npm ci --ignore-scripts` (note: AST analysis may break without tree-sitter WASM artifacts).
+
 ## What It Does
 
 skill-vettr scans a skill's source code, dependencies, and metadata for security issues. It uses:
@@ -31,6 +33,19 @@ This is a heuristic scanner. It has inherent limitations:
 - Malicious package lists are small and non-exhaustive
 
 For high-security environments, combine with sandboxing and manual review.
+
+## External Binaries
+
+The `vet-url` and `vet-clawhub` commands invoke external binaries via `execSafe` (uses `execFile`, no shell spawned):
+
+| Binary | Command | Purpose |
+|--------|---------|---------|
+| `git` | `vet-url` | Clone `.git` URLs (hooks disabled via `-c core.hooksPath=/dev/null`) |
+| `curl` | `vet-url` | Download archive URLs (max 50 MB, 120s timeout) |
+| `tar` | `vet-url` | Extract archives (`--no-same-owner --no-same-permissions`) |
+| `clawhub` | `vet-clawhub` | Fetch skills from ClawHub registry |
+
+The `/skill:vet` command (local path) requires only `node`. Ensure external binaries are trusted and available on `PATH` before using remote vetting commands.
 
 ## Usage
 
@@ -101,6 +116,10 @@ Tests use Node's built-in test runner (`node:test`). The test suite covers each 
 ## Security Notes
 
 The `vet` and `vet-url` commands allow paths under the current working directory (`process.cwd()`) as a convenience, so you can vet skills directly in your workspace without copying them elsewhere. The trade-off is that any path under `cwd` is accepted for vetting, which may be a broader scope than intended if you run the tool from a high-privilege or sensitive directory. In high-security environments, consider running skill-vettr from a dedicated, isolated directory to limit the allowed root scope.
+
+The `vet-url` command downloads and extracts remote archives into a temporary directory. This is necessary for its purpose but means external binaries (`curl`, `tar`, `git`) touch the filesystem. The `vet-clawhub` command similarly invokes the `clawhub` CLI. Run these commands only against URLs and slugs you have reason to trust, and prefer running inside a disposable container or VM for untrusted sources.
+
+If you enable the `autoVet` hook, review your configuration carefully — it will automatically invoke the vetting engine on every `skill:pre-install` event.
 
 ## Publishing
 

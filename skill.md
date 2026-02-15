@@ -8,9 +8,14 @@ emoji: "🛡️"
 metadata:
   openclaw:
     requires:
-      bins: ["node"]
+      bins: ["node", "git", "curl", "tar", "clawhub"]
       env: []
-    notes: "Run `npm install` after cloning. Requires .wasm files from node_modules at runtime."
+    notes: >
+      Run `npm install` after cloning (see install safety notes below).
+      Requires .wasm files from node_modules at runtime.
+      git/curl/tar are used by vet-url to download and extract remote archives.
+      clawhub CLI is used by vet-clawhub to fetch skills from the registry.
+      Only the /skill:vet command (local path) needs no external binaries beyond node.
 ---
 
 # skill-vettr v2.0.1
@@ -24,6 +29,21 @@ npm install
 ```
 
 This installs all Node.js dependencies, including tree-sitter `.wasm` grammar files required at runtime for AST-based analysis. The `.wasm` files are located in `node_modules` and must be present for the skill to function.
+
+> ⚠️ **Install safety:** `npm install` runs dependency lifecycle scripts, which can execute arbitrary code. For stronger isolation, run `npm ci --ignore-scripts` — but note that tree-sitter native/WASM artifacts may not build, breaking AST analysis. Prefer installing inside a container or VM when possible.
+
+## External Binaries
+
+The `vet-url` and `vet-clawhub` commands invoke external binaries via `execSafe` (which uses `execFile` — no shell is spawned). Only the following commands are permitted:
+
+| Binary | Used By | Purpose |
+|--------|---------|---------|
+| `git` | `vet-url` | Clone `.git` URLs (with hooks disabled) |
+| `curl` | `vet-url` | Download archive URLs |
+| `tar` | `vet-url` | Extract downloaded archives |
+| `clawhub` | `vet-clawhub` | Fetch skills from ClawHub registry |
+
+The `/skill:vet` command (local path vetting) requires only `node` and no external binaries.
 
 ## Commands
 
@@ -58,5 +78,7 @@ This installs all Node.js dependencies, including tree-sitter `.wasm` grammar fi
 - **Limited network detection** — Only detects `fetch()` with literal URL strings; misses axios, http module, dynamic URLs
 - **No sandboxing** — Does not execute or isolate target code
 - **Comment scanning** — Prompt injection detection scans string literals, not comments
+- **Broad filesystem scope** — `vet-url` downloads and extracts remote archives into a temp directory; `vet` accepts any path under `process.cwd()`. Run from an isolated directory to limit exposure
+- **External binary trust** — `vet-url` and `vet-clawhub` invoke `git`, `curl`, `tar`, and `clawhub` via `execFile`. These binaries must be trusted and present on `PATH`
 
-For high-security environments, combine with sandboxing and manual source review.
+For high-security environments, combine with sandboxing, network isolation, and manual source review. Run inside a disposable container when vetting untrusted URLs.
