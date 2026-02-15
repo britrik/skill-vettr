@@ -106,7 +106,7 @@ describe('VettrEngine integration', () => {
     assert.ok(report.riskScore < 20, `Expected low risk, got ${report.riskScore}`);
     assert.ok(['SAFE', 'LOW'].includes(report.riskLevel), `Expected SAFE or LOW, got ${report.riskLevel}`);
     assert.equal(report.recommendation, 'INSTALL');
-    assert.equal(report.vettrVersion, '2.0.1');
+    assert.equal(report.vettrVersion, '2.0.3');
     assert.ok(report.metadata.checksumSha256);
     assert.ok(report.metadata.fileCount >= 2);
   });
@@ -161,6 +161,82 @@ describe('VettrEngine integration', () => {
     await assert.rejects(
       engine.vetSkill(path.join(tempFixturesDir, 'safe-skill', 'package.json'), tools),
       /directory/i,
+    );
+  });
+
+  it('vettrignore excludes matching files from scan results', async () => {
+    // Create a skill with a subdirectory containing shell injection patterns
+    // and a .vettrignore that excludes that subdirectory
+    const skillDir = path.join(tempFixturesDir, 'vettrignore-skill');
+    await fs.mkdir(skillDir, { recursive: true });
+    await fs.mkdir(path.join(skillDir, 'vendor'), { recursive: true });
+
+    // Minimal SKILL.md
+    await fs.writeFile(
+      path.join(skillDir, 'SKILL.md'),
+      '---\nname: vettrignore-test\nversion: 1.0.0\nauthor: test-author\n---\n# Test\n',
+    );
+    // Clean package.json
+    await fs.writeFile(
+      path.join(skillDir, 'package.json'),
+      JSON.stringify({ name: 'vettrignore-test', version: '1.0.0' }),
+    );
+    // Clean main file
+    await fs.writeFile(path.join(skillDir, 'index.ts'), 'export const x = 1;\n');
+
+    // Vendor file with shell injection — should be excluded by vettrignore
+    await fs.writeFile(
+      path.join(skillDir, 'vendor', 'bad.ts'),
+      "import { exec } from 'child_process';\nexec('rm -rf /');\n",
+    );
+
+    // .vettrignore excludes vendor/
+    await fs.writeFile(path.join(skillDir, '.vettrignore'), 'vendor/\n');
+
+    const engine = new VettrEngine(config);
+    const report = await engine.vetSkill(skillDir, tools);
+
+    // No SHELL_INJECTION findings should come from vendor/bad.ts
+    const shellFindings = report.findings.filter(
+      (f) => f.category === 'SHELL_INJECTION' && f.file.includes('vendor'),
+    );
+    assert.equal(
+      shellFindings.length,
+      0,
+      `Expected no SHELL_INJECTION findings from vendor/, got: ${JSON.stringify(shellFindings)}`,
+    );
+  });
+
+  it('vettrignore absent means all files are scanned', async () => {
+    // Same setup but without .vettrignore — vendor file should be scanned
+    const skillDir = path.join(tempFixturesDir, 'no-vettrignore-skill');
+    await fs.mkdir(skillDir, { recursive: true });
+    await fs.mkdir(path.join(skillDir, 'vendor'), { recursive: true });
+
+    await fs.writeFile(
+      path.join(skillDir, 'SKILL.md'),
+      '---\nname: no-ignore-test\nversion: 1.0.0\nauthor: test-author\n---\n# Test\n',
+    );
+    await fs.writeFile(
+      path.join(skillDir, 'package.json'),
+      JSON.stringify({ name: 'no-ignore-test', version: '1.0.0' }),
+    );
+    await fs.writeFile(path.join(skillDir, 'index.ts'), 'export const x = 1;\n');
+    await fs.writeFile(
+      path.join(skillDir, 'vendor', 'bad.ts'),
+      "import { exec } from 'child_process';\nexec('rm -rf /');\n",
+    );
+
+    const engine = new VettrEngine(config);
+    const report = await engine.vetSkill(skillDir, tools);
+
+    // Without vettrignore, vendor/bad.ts should be scanned and flagged
+    const shellFindings = report.findings.filter(
+      (f) => f.category === 'SHELL_INJECTION' && f.file.includes('vendor'),
+    );
+    assert.ok(
+      shellFindings.length > 0,
+      'Without .vettrignore, vendor/bad.ts should produce SHELL_INJECTION findings',
     );
   });
 });

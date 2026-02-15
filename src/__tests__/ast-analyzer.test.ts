@@ -9,6 +9,43 @@ describe('AstAnalyzer', () => {
     await analyzer.init();
   });
 
+  describe('WASM artifact verification', () => {
+    it('exposes REQUIRED_WASM_PATHS as a static readonly array', () => {
+      assert.ok(Array.isArray(AstAnalyzer.REQUIRED_WASM_PATHS));
+      assert.ok(AstAnalyzer.REQUIRED_WASM_PATHS.length > 0);
+      for (const p of AstAnalyzer.REQUIRED_WASM_PATHS) {
+        assert.ok(p.endsWith('.wasm'), `Expected .wasm extension: ${p}`);
+      }
+    });
+
+    it('throws descriptive error when WASM files are missing', async () => {
+      const fresh = new AstAnalyzer();
+      const original = AstAnalyzer.REQUIRED_WASM_PATHS;
+
+      // Temporarily override with a non-existent WASM path
+      const fakePaths = ['nonexistent-pkg/missing.wasm'];
+      Object.defineProperty(AstAnalyzer, 'REQUIRED_WASM_PATHS', {
+        value: fakePaths,
+        configurable: true,
+      });
+
+      try {
+        await assert.rejects(() => fresh.init(), (err: Error) => {
+          assert.ok(err.message.includes('Missing required WASM artifacts'));
+          assert.ok(err.message.includes('npm install'));
+          assert.ok(err.message.includes('nonexistent-pkg/missing.wasm'));
+          return true;
+        });
+      } finally {
+        // Restore original paths
+        Object.defineProperty(AstAnalyzer, 'REQUIRED_WASM_PATHS', {
+          value: original,
+          configurable: true,
+        });
+      }
+    });
+  });
+
   describe('eval detection', () => {
     it('detects eval() calls', () => {
       const findings = analyzer.analyze('test.js', 'eval("code")', '.js');

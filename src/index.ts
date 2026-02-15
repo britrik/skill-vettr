@@ -33,7 +33,7 @@ const DEFAULT_CONFIG: VettingConfig = {
 
 export default class SkillVettr implements OpenClawSkill {
   name = 'skill-vettr';
-  version = '2.0.1';
+  version = '2.0.3';
   description = 'Security vetting for third-party OpenClaw skills';
 
   private config: VettingConfig = DEFAULT_CONFIG;
@@ -54,7 +54,7 @@ export default class SkillVettr implements OpenClawSkill {
       }
 
       try {
-        const sanitisedPath = sanitisePath(skillPath, getAllowedRoots());
+        const sanitisedPath = sanitisePath(skillPath, getAllowedRoots({ allowCwd: this.config.allowCwd }));
 
         ctx.ui.showProgress('Analysing skill...');
         const report = await this.engine.vetSkill(sanitisedPath, ctx.tools);

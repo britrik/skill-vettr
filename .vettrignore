@@ -1,0 +1,2 @@
+# Exclude test fixtures containing deliberate malicious patterns from self-scans
+test/fixtures/

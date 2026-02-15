@@ -68,6 +68,12 @@ export interface VettingConfig {
   blockedAuthors?: string[];
   blockedPackages?: string[];
   typosquatTargets?: string[];
+  allowCwd?: boolean;
+}
+
+export interface AllowedRootsConfig {
+  allowCwd?: boolean;
+  additionalRoots?: string[];
 }
 
 export interface ToolsInterface {

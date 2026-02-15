@@ -1,6 +1,7 @@
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
+import type { AllowedRootsConfig } from '../types.js';
 
 const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$/i;
 const URL_PATTERN = /^https:\/\/[a-z0-9][a-z0-9.-]*[a-z0-9]\.[a-z]{2,}(\/[\w./-]*)?$/i;
@@ -60,13 +61,22 @@ export function sanitisePath(input: string, allowedRoots: string[]): string {
   return resolved;
 }
 
-export function getAllowedRoots(): string[] {
-  return [
+export function getAllowedRoots(config?: AllowedRootsConfig): string[] {
+  const roots = [
     os.tmpdir(),
     path.join(os.homedir(), '.openclaw'),
     path.join(os.homedir(), 'Downloads'),
-    process.cwd(),
   ];
+
+  if (config?.allowCwd === true) {
+    roots.push(process.cwd());
+  }
+
+  if (config?.additionalRoots) {
+    roots.push(...config.additionalRoots);
+  }
+
+  return roots;
 }
 
 export function generateSecureTempName(): string {

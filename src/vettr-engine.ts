@@ -16,8 +16,9 @@ import { PatternAnalyzer } from './analyzers/pattern-analyzer.js';
 import { MetadataAnalyzer } from './analyzers/metadata-analyzer.js';
 import { DependencyAnalyzer } from './analyzers/dependency-analyzer.js';
 import { sanitisePath, getAllowedRoots, truncateEvidence } from './utils/sanitise.js';
+import { parseVettrignore, isExcluded } from './utils/vettrignore.js';
 
-const VERSION = '2.0.1';
+const VERSION = '2.0.3';
 
 const TEXT_EXTENSIONS = new Set([
   '.ts', '.js', '.mjs', '.cjs', '.mts', '.cts', '.jsx', '.tsx',
@@ -53,7 +54,7 @@ export class VettrEngine {
   }
 
   async vetSkill(skillPath: string, tools: ToolsInterface): Promise<VettingReport> {
-    const resolvedPath = sanitisePath(skillPath, getAllowedRoots());
+    const resolvedPath = sanitisePath(skillPath, getAllowedRoots({ allowCwd: this.config.allowCwd }));
 
     const stats = await tools.stat(resolvedPath);
     if (!stats.isDirectory()) {
@@ -69,7 +70,12 @@ export class VettrEngine {
     const networkCalls: NetworkCall[] = [];
     let manifest: SkillManifest = { name: 'unknown', version: '0.0.0' };
 
-    const files = await this.collectFiles(resolvedPath, tools);
+    // Load .vettrignore if present
+    const { patterns: ignorePatterns, findings: ignoreFindings } =
+      await this.loadVettrignore(resolvedPath, tools);
+    findings.push(...ignoreFindings);
+
+    const files = await this.collectFiles(resolvedPath, tools, undefined, ignorePatterns);
 
     for (const file of files) {
       if (file.includes('node_modules')) continue;
@@ -172,6 +178,7 @@ export class VettrEngine {
     dir: string,
     tools: ToolsInterface,
     rootDir?: string,
+    ignorePatterns?: string[],
   ): Promise<string[]> {
     const results: string[] = [];
     const entries = await tools.readdir(dir);
@@ -206,8 +213,14 @@ export class VettrEngine {
           continue;
         }
 
+        // Check vettrignore exclusion
+        const relativePath = path.relative(effectiveRoot, fullPath);
+        if (ignorePatterns && ignorePatterns.length > 0 && isExcluded(relativePath, ignorePatterns)) {
+          continue;
+        }
+
         if (stats.isDirectory()) {
-          const subFiles = await this.collectFiles(fullPath, tools, effectiveRoot);
+          const subFiles = await this.collectFiles(fullPath, tools, effectiveRoot, ignorePatterns);
           results.push(...subFiles);
         } else if (stats.isFile()) {
           results.push(fullPath);
@@ -218,6 +231,51 @@ export class VettrEngine {
     }
 
     return results;
+  }
+
+  private async loadVettrignore(
+    skillPath: string,
+    tools: ToolsInterface,
+  ): Promise<{ patterns: string[]; findings: Finding[] }> {
+    const ignorePath = path.join(skillPath, '.vettrignore');
+    const findings: Finding[] = [];
+
+    try {
+      const content = await tools.readFile(ignorePath);
+      const result = parseVettrignore(content);
+
+      for (const warning of result.warnings) {
+        findings.push({
+          id: crypto.randomBytes(8).toString('hex'),
+          severity: 'INFO',
+          category: 'PERMISSION_RISK',
+          message: `.vettrignore warning: ${warning}`,
+          file: ignorePath,
+          evidence: warning,
+        });
+      }
+
+      return { patterns: result.patterns, findings };
+    } catch {
+      // .vettrignore missing or unreadable — scan everything
+      // Only add a finding if the file exists but is unreadable
+      try {
+        await tools.stat(ignorePath);
+        // File exists but readFile failed — unreadable
+        findings.push({
+          id: crypto.randomBytes(8).toString('hex'),
+          severity: 'INFO',
+          category: 'PERMISSION_RISK',
+          message: 'Unreadable .vettrignore file; scanning all files',
+          file: ignorePath,
+          evidence: 'File exists but could not be read',
+        });
+      } catch {
+        // File doesn't exist — no finding needed
+      }
+
+      return { patterns: [], findings };
+    }
   }
 
   private parseSkillManifest(content: string, file: string, findings: Finding[]): SkillManifest {

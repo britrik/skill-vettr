@@ -110,19 +110,29 @@ describe('generateFindingId', () => {
 
 
 /**
- * Property 4: getAllowedRoots includes the current working directory
- * Validates: Requirements 5.1, 5.2
+ * getAllowedRoots: verifies base set and allowCwd behavior
+ * Validates: Requirements 2.2, 2.3, 2.4
  */
 describe('getAllowedRoots', () => {
-  it('includes process.cwd()', () => {
+  it('excludes process.cwd() by default (no config)', () => {
     const roots = getAllowedRoots();
     assert.ok(
-      roots.includes(process.cwd()),
-      `Expected getAllowedRoots() to include process.cwd() ("${process.cwd()}"), got: ${JSON.stringify(roots)}`,
+      !roots.includes(process.cwd()),
+      `Expected getAllowedRoots() to exclude process.cwd() by default, got: ${JSON.stringify(roots)}`,
     );
   });
 
-  it('includes all expected roots', () => {
+  it('excludes process.cwd() when allowCwd is false', () => {
+    const roots = getAllowedRoots({ allowCwd: false });
+    assert.ok(!roots.includes(process.cwd()), 'process.cwd() should not be in roots when allowCwd is false');
+  });
+
+  it('includes process.cwd() when allowCwd is true', () => {
+    const roots = getAllowedRoots({ allowCwd: true });
+    assert.ok(roots.includes(process.cwd()), 'process.cwd() should be in roots when allowCwd is true');
+  });
+
+  it('includes base roots without config', () => {
     const roots = getAllowedRoots();
     assert.ok(roots.includes(os.tmpdir()), 'Missing os.tmpdir()');
     assert.ok(
@@ -133,11 +143,20 @@ describe('getAllowedRoots', () => {
       roots.includes(path.join(os.homedir(), 'Downloads')),
       'Missing ~/Downloads',
     );
-    assert.ok(roots.includes(process.cwd()), 'Missing process.cwd()');
   });
 
-  it('returns exactly 4 roots', () => {
+  it('returns exactly 3 roots by default', () => {
     const roots = getAllowedRoots();
+    assert.equal(roots.length, 3);
+  });
+
+  it('returns 4 roots when allowCwd is true', () => {
+    const roots = getAllowedRoots({ allowCwd: true });
     assert.equal(roots.length, 4);
+  });
+
+  it('includes additionalRoots when provided', () => {
+    const roots = getAllowedRoots({ additionalRoots: ['/custom/path'] });
+    assert.ok(roots.includes('/custom/path'), 'Missing additional root');
   });
 });

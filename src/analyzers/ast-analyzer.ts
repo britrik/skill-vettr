@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Parser, Language, Query } from 'web-tree-sitter';
@@ -29,15 +30,38 @@ export class AstAnalyzer {
   private tsQueries: CompiledRule[] = [];
   private initialised = false;
 
+  /** WASM artifacts required at runtime, relative to node_modules. */
+  static readonly REQUIRED_WASM_PATHS = [
+    path.join('tree-sitter-javascript', 'tree-sitter-javascript.wasm'),
+    path.join('tree-sitter-typescript', 'tree-sitter-typescript.wasm'),
+    path.join('web-tree-sitter', 'web-tree-sitter.wasm'),
+  ];
+
   async init(): Promise<void> {
     if (this.initialised) return;
-
-    await Parser.init();
-    this.parser = new Parser();
 
     // Resolve .wasm paths relative to this module, not cwd.
     const thisDir = path.dirname(fileURLToPath(import.meta.url));
     const nodeModules = path.resolve(thisDir, '..', '..', 'node_modules');
+
+    // Verify WASM artifacts exist before attempting to load
+    const missing: string[] = [];
+    for (const wasmRelPath of AstAnalyzer.REQUIRED_WASM_PATHS) {
+      const fullPath = path.join(nodeModules, wasmRelPath);
+      try {
+        await fs.access(fullPath);
+      } catch {
+        missing.push(wasmRelPath);
+      }
+    }
+    if (missing.length > 0) {
+      throw new Error(
+        `Missing required WASM artifacts (run "npm install" to fix):\n${missing.map((p) => `  - ${p}`).join('\n')}`,
+      );
+    }
+
+    await Parser.init();
+    this.parser = new Parser();
 
     this.jsLang = await Language.load(
       path.join(nodeModules, 'tree-sitter-javascript', 'tree-sitter-javascript.wasm'),
