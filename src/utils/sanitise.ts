@@ -65,6 +65,7 @@ export function getAllowedRoots(): string[] {
     os.tmpdir(),
     path.join(os.homedir(), '.openclaw'),
     path.join(os.homedir(), 'Downloads'),
+    process.cwd(),
   ];
 }
 

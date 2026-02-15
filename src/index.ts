@@ -3,13 +3,12 @@ import os from 'node:os';
 
 import { OpenClawSkill, SkillContext } from '@openclaw/sdk';
 import { VettrEngine } from './vettr-engine.js';
-import { VettingConfig, VettingReport } from './types.js';
+import { ToolsInterface, VettingConfig, VettingReport } from './types.js';
 import {
   sanitiseSlug,
   sanitiseUrl,
   sanitisePath,
   getAllowedRoots,
-  generateSecureTempName,
 } from './utils/sanitise.js';
 import { execSafe } from './utils/exec-safe.js';
 
@@ -78,18 +77,23 @@ export default class SkillVettr implements OpenClawSkill {
 
       try {
         const sanitisedUrl = sanitiseUrl(url);
-        tempDir = path.join(os.tmpdir(), generateSecureTempName());
+        tempDir = await ctx.tools.mkdtemp(path.join(os.tmpdir(), 'skill-vettr-'));
 
         ctx.ui.showProgress(`Downloading from ${sanitisedUrl}...`);
 
         // Download using safe exec
         if (sanitisedUrl.endsWith('.git')) {
-          await execSafe('git', ['clone', '--depth', '1', sanitisedUrl, tempDir]);
+          await execSafe('git', ['-c', 'core.hooksPath=/dev/null', 'clone', '--depth', '1', sanitisedUrl, tempDir]);
         } else {
           const tarPath = path.join(tempDir, 'skill.tar.gz');
-          await ctx.tools.writeFile(tarPath, ''); // Create dir
-          await execSafe('curl', ['-fsSL', '-o', tarPath, sanitisedUrl]);
-          await execSafe('tar', ['-xzf', tarPath, '-C', tempDir]);
+          await execSafe('curl', ['-fsSL', '--max-filesize', '52428800', '--max-time', '120', '-o', tarPath, sanitisedUrl]);
+          await execSafe('tar', ['-xzf', tarPath, '-C', tempDir, '--no-same-owner', '--no-same-permissions']);
+        }
+
+        // Validate that downloaded content is actually a skill
+        const hasManifest = await findSkillManifest(tempDir, ctx.tools);
+        if (!hasManifest) {
+          throw new Error('Downloaded content is not a valid OpenClaw skill: no SKILL.md found');
         }
 
         ctx.ui.showProgress('Analysing skill...');
@@ -124,6 +128,12 @@ export default class SkillVettr implements OpenClawSkill {
         ctx.ui.showProgress(`Fetching "${sanitisedSlug}" from ClawHub...`);
 
         await execSafe('clawhub', ['download', sanitisedSlug, '--output', tempDir]);
+
+        // Validate that downloaded content is actually a skill
+        const hasManifest = await findSkillManifest(tempDir, ctx.tools);
+        if (!hasManifest) {
+          throw new Error('Downloaded content is not a valid OpenClaw skill: no SKILL.md found');
+        }
 
         ctx.ui.showProgress('Analysing skill...');
         const report = await this.engine.vetSkill(tempDir, ctx.tools);
@@ -286,4 +296,35 @@ export default class SkillVettr implements OpenClawSkill {
     };
     return icons[rec];
   }
+}
+
+/**
+ * Checks for a SKILL.md file at the root of a directory or one level deep (case-insensitive).
+ * Tar archives often extract into a subfolder, so we check one level of subdirectories.
+ */
+export async function findSkillManifest(dir: string, tools: ToolsInterface): Promise<boolean> {
+  const entries = await tools.readdir(dir);
+
+  // Check root level
+  if (entries.some((e) => e.toLowerCase() === 'skill.md')) {
+    return true;
+  }
+
+  // Check one level deep (subdirectories only)
+  for (const entry of entries) {
+    const entryPath = path.join(dir, entry);
+    try {
+      const st = await tools.lstat(entryPath);
+      if (st.isDirectory()) {
+        const subEntries = await tools.readdir(entryPath);
+        if (subEntries.some((e) => e.toLowerCase() === 'skill.md')) {
+          return true;
+        }
+      }
+    } catch {
+      // Skip entries that can't be stat'd
+    }
+  }
+
+  return false;
 }

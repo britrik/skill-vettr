@@ -5,11 +5,25 @@ author: britrik
 description: Static analysis security scanner for third-party OpenClaw skills. Detects eval/spawn risks, malicious dependencies, typosquatting, and prompt injection patterns before installation. Use when vetting skills from ClawHub or untrusted sources.
 tags: ["security", "scanner", "vetting", "analysis", "static-analysis"]
 emoji: "🛡️"
+metadata:
+  openclaw:
+    requires:
+      bins: ["node"]
+      env: []
+    notes: "Run `npm install` after cloning. Requires .wasm files from node_modules at runtime."
 ---
 
 # skill-vettr v2.0.1
 
 Security scanner for third-party OpenClaw skills. Analyses source code, dependencies, and metadata before installation using tree-sitter AST parsing and regex pattern matching.
+
+## Installation
+
+```bash
+npm install
+```
+
+This installs all Node.js dependencies, including tree-sitter `.wasm` grammar files required at runtime for AST-based analysis. The `.wasm` files are located in `node_modules` and must be present for the skill to function.
 
 ## Commands
 
@@ -25,7 +39,7 @@ Security scanner for third-party OpenClaw skills. Analyses source code, dependen
 | Shell injection | AST | exec(), execSync(), spawn("bash"), child_process imports |
 | Dynamic require | AST | require(variable), require(templateString) |
 | Prototype pollution | AST | __proto__ assignment |
-| Prompt injection | Regex | Instruction overrides, control tokens (in string literals) |
+| Prompt injection | Regex | Instruction override patterns, control tokens (in string literals) |
 | Homoglyph attacks | Regex | Cyrillic/Greek lookalike characters in identifiers |
 | Encoded names | Regex | Unicode/hex-escaped "eval", "exec" |
 | Credential paths | Regex | .ssh/, .aws/, keychain path references |
