@@ -8,6 +8,7 @@ import {
   sanitisePath,
   truncateEvidence,
   generateFindingId,
+  getAllowedRoots,
 } from '../utils/sanitise.js';
 
 describe('sanitiseSlug', () => {
@@ -104,5 +105,39 @@ describe('generateFindingId', () => {
   it('generates unique ids', () => {
     const ids = new Set(Array.from({ length: 100 }, () => generateFindingId()));
     assert.equal(ids.size, 100);
+  });
+});
+
+
+/**
+ * Property 4: getAllowedRoots includes the current working directory
+ * Validates: Requirements 5.1, 5.2
+ */
+describe('getAllowedRoots', () => {
+  it('includes process.cwd()', () => {
+    const roots = getAllowedRoots();
+    assert.ok(
+      roots.includes(process.cwd()),
+      `Expected getAllowedRoots() to include process.cwd() ("${process.cwd()}"), got: ${JSON.stringify(roots)}`,
+    );
+  });
+
+  it('includes all expected roots', () => {
+    const roots = getAllowedRoots();
+    assert.ok(roots.includes(os.tmpdir()), 'Missing os.tmpdir()');
+    assert.ok(
+      roots.includes(path.join(os.homedir(), '.openclaw')),
+      'Missing ~/.openclaw',
+    );
+    assert.ok(
+      roots.includes(path.join(os.homedir(), 'Downloads')),
+      'Missing ~/Downloads',
+    );
+    assert.ok(roots.includes(process.cwd()), 'Missing process.cwd()');
+  });
+
+  it('returns exactly 4 roots', () => {
+    const roots = getAllowedRoots();
+    assert.equal(roots.length, 4);
   });
 });

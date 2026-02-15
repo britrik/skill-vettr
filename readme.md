@@ -1,4 +1,4 @@
-# skill-vettr v2.0.0
+# skill-vettr v2.0.1
 
 Static analysis security scanner for OpenClaw skills. Analyses code before installation to detect common threats.
 
@@ -97,6 +97,14 @@ npm test
 ```
 
 Tests use Node's built-in test runner (`node:test`). The test suite covers each analyzer independently plus end-to-end integration tests against fixture skill directories.
+
+## Security Notes
+
+The `vet` and `vet-url` commands allow paths under the current working directory (`process.cwd()`) as a convenience, so you can vet skills directly in your workspace without copying them elsewhere. The trade-off is that any path under `cwd` is accepted for vetting, which may be a broader scope than intended if you run the tool from a high-privilege or sensitive directory. In high-security environments, consider running skill-vettr from a dedicated, isolated directory to limit the allowed root scope.
+
+## Publishing
+
+The root directory of this repository is the publishable artifact. There is no separate build or packaging step required — publish directly from the repo root.
 
 ## Licence
 
