@@ -128,3 +128,7 @@ The root directory of this repository is the publishable artifact. There is no s
 ## Licence
 
 MIT
+
+## Download History
+
+[![Download History](https://skill-history.com/chart/britrik/skill-vettr.svg)](https://skill-history.com/britrik/skill-vettr)
