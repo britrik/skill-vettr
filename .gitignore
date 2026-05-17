@@ -2,3 +2,4 @@ node_modules/
 dist/
 *.wasm
 .kiro/
+.clawpatch/
