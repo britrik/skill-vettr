@@ -1,0 +1,10 @@
+# Exclude test fixtures that contain deliberately malicious code patterns
+# (used for scanner detection testing, but triggers ClawHub's security scanners)
+test/
+src/__tests__/
+dist/__tests__/
+
+# Build artifacts and dev files
+node_modules/
+.clawpatch/
+tsconfig.json

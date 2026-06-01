@@ -1,31 +1,27 @@
 ---
 name: skill-vettr
+description: "Static analysis security scanner for third-party OpenClaw skills. Detects eval/spawn risks, malicious dependencies, typosquatting, and prompt injection patterns before installation. Use when vetting skills from ClawHub or untrusted sources."
 version: "2.0.3"
 author: britrik
-description: Static analysis security scanner for third-party OpenClaw skills. Detects eval/spawn risks, malicious dependencies, typosquatting, and prompt injection patterns before installation. Use when vetting skills from ClawHub or untrusted sources.
 tags: ["security", "scanner", "vetting", "analysis", "static-analysis"]
-emoji: "🛡️"
 metadata:
   openclaw:
     requires:
-      bins: ["node", "git", "curl", "tar", "clawhub"]
       env: []
+      bins:
+        - node
+    envVars: []
     install:
-      command: "npm install"
-      artifacts:
-        - "node_modules/tree-sitter-javascript/tree-sitter-javascript.wasm"
-        - "node_modules/tree-sitter-typescript/tree-sitter-typescript.wasm"
-        - "node_modules/web-tree-sitter/web-tree-sitter.wasm"
-      safety: >
-        npm install runs dependency lifecycle scripts. tree-sitter packages
-        use hasInstallScript for native/WASM builds. For isolation, run
-        npm ci --ignore-scripts inside a container, then manually verify
-        .wasm artifacts exist.
+      - kind: node
+        package: "@openclaw/skill-vettr"
+        bins: []
+    emoji: "\U0001F6E1"
+    homepage: https://github.com/britrik/skill-vettr
     notes: >
-      Requires .wasm files from node_modules at runtime.
-      git/curl/tar are used by vet-url to download and extract remote archives.
-      clawhub CLI is used by vet-clawhub to fetch skills from the registry.
-      Only the /skill:vet command (local path) needs no external binaries beyond node.
+      Core /skill:vet command requires only node. The /skill:vet-url command
+      additionally requires git, curl, and tar on PATH. The /skill:vet-clawhub
+      command requires the clawhub CLI. These are runtime-optional — the skill
+      loads and registers commands regardless of their presence.
 ---
 
 # skill-vettr v2.0.3
