@@ -4,6 +4,11 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
     branches: [main]
+    paths-ignore: ['**/*.md', 'docs/**']
+
+concurrency:
+  group: ai-review-${{ github.repository }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   pull-requests: write
