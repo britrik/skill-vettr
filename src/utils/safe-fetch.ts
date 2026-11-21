@@ -76,6 +76,25 @@ export async function resolvePublicHost(hostname: string, resolver: Resolver = d
   return addresses;
 }
 
+/** Git versions before 2.37 silently ignore `http.curloptResolve`, which would undo the address pin. */
+export const MIN_GIT_FOR_RESOLVE_PIN: [number, number] = [2, 37];
+
+/** Throw unless `git --version` output names a git new enough to honour `http.curloptResolve`. */
+export function assertGitSupportsResolvePin(versionOutput: string): void {
+  const match = /git version (\d+)\.(\d+)/.exec(versionOutput);
+  const [minMajor, minMinor] = MIN_GIT_FOR_RESOLVE_PIN;
+  if (!match) {
+    throw new Error('Could not determine the git version; refusing to clone without an address pin');
+  }
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  if (major < minMajor || (major === minMajor && minor < minMinor)) {
+    throw new Error(
+      `git ${major}.${minor} ignores http.curloptResolve; git ${minMajor}.${minMinor} or later is required to clone .git URLs`,
+    );
+  }
+}
+
 /**
  * Build a curl resolve entry (`host:443:addr[,addr]`) for git's `http.curloptResolve`, so git
  * connects only to the addresses that already passed the public-address check and cannot be

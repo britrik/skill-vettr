@@ -11,7 +11,7 @@ import {
   getAllowedRoots,
 } from './utils/sanitise.js';
 import { execSafe } from './utils/exec-safe.js';
-import { downloadPublicHttps, gitResolvePin, resolvePublicHost } from './utils/safe-fetch.js';
+import { assertGitSupportsResolvePin, downloadPublicHttps, gitResolvePin, resolvePublicHost } from './utils/safe-fetch.js';
 
 const DEFAULT_CONFIG: VettingConfig = {
   maxNetworkCalls: 5,
@@ -34,7 +34,7 @@ const DEFAULT_CONFIG: VettingConfig = {
 
 export default class SkillVettr implements OpenClawSkill {
   name = 'skill-vettr';
-  version = '2.0.7';
+  version = '2.0.8';
   description = 'Security vetting for third-party OpenClaw skills';
 
   private config: VettingConfig = DEFAULT_CONFIG;
@@ -88,6 +88,8 @@ export default class SkillVettr implements OpenClawSkill {
           if (parsedGitUrl.port && parsedGitUrl.port !== '443') {
             throw new Error('Git URLs must use the default HTTPS port');
           }
+          const { stdout: gitVersion } = await execSafe('git', ['--version']);
+          assertGitSupportsResolvePin(gitVersion);
           const addresses = await resolvePublicHost(parsedGitUrl.hostname);
           await execSafe('git', [
             '-c', 'core.hooksPath=/dev/null',

@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
-import { checkRedirectTarget, gitResolvePin, isPublicAddress, resolvePublicHost, downloadPublicHttps } from '../utils/safe-fetch.js';
+import { assertGitSupportsResolvePin, checkRedirectTarget, gitResolvePin, isPublicAddress, resolvePublicHost, downloadPublicHttps } from '../utils/safe-fetch.js';
 
 describe('isPublicAddress', () => {
   it('rejects loopback, private, link-local and metadata addresses', () => {
@@ -90,5 +90,19 @@ describe('gitResolvePin', () => {
   it('refuses an empty or non-public address list', () => {
     assert.throws(() => gitResolvePin('example.com', []), /non-public or empty/);
     assert.throws(() => gitResolvePin('example.com', ['93.184.216.34', '10.0.0.1']), /non-public or empty/);
+  });
+});
+
+describe('assertGitSupportsResolvePin', () => {
+  it('accepts git 2.37 and later', () => {
+    for (const v of ['git version 2.37.0', 'git version 2.53.0\n', 'git version 3.0.1', 'git version 2.39.5 (Apple Git-154)']) {
+      assert.doesNotThrow(() => assertGitSupportsResolvePin(v), v);
+    }
+  });
+
+  it('refuses older or unrecognised git versions', () => {
+    assert.throws(() => assertGitSupportsResolvePin('git version 2.36.6'), /ignores http.curloptResolve/);
+    assert.throws(() => assertGitSupportsResolvePin('git version 1.9.1'), /ignores http.curloptResolve/);
+    assert.throws(() => assertGitSupportsResolvePin('something else'), /Could not determine/);
   });
 });
