@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
-import { isPublicAddress, resolvePublicHost, downloadPublicHttps } from '../utils/safe-fetch.js';
+import { checkRedirectTarget, isPublicAddress, resolvePublicHost, downloadPublicHttps } from '../utils/safe-fetch.js';
 
 describe('isPublicAddress', () => {
   it('rejects loopback, private, link-local and metadata addresses', () => {
@@ -62,5 +62,19 @@ describe('downloadPublicHttps', () => {
       }),
       /Invalid URL format/,
     );
+  });
+});
+
+
+describe('checkRedirectTarget', () => {
+  it('accepts signed HTTPS download URLs with query strings', () => {
+    const url = 'https://objects.example.com/archive.tar.gz?X-Amz-Signature=abc&X-Amz-Expires=300';
+    assert.equal(checkRedirectTarget(url), url);
+  });
+
+  it('rejects downgrade, credentials and non-default ports', () => {
+    assert.throws(() => checkRedirectTarget('http://example.com/a.tgz'), /HTTPS/);
+    assert.throws(() => checkRedirectTarget('https://user:pw@example.com/a.tgz'), /credentials/);
+    assert.throws(() => checkRedirectTarget('https://example.com:8443/a.tgz'), /port/);
   });
 });

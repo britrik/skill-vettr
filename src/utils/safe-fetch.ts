@@ -76,6 +76,25 @@ export async function resolvePublicHost(hostname: string, resolver: Resolver = d
   return addresses;
 }
 
+/**
+ * Validate a redirect destination. Unlike the user-supplied URL, signed download
+ * URLs carry query strings, so only the scheme, credentials and port are checked
+ * here; the host is checked by resolvePublicHost before connecting.
+ */
+export function checkRedirectTarget(target: string): string {
+  const parsed = new URL(target);
+  if (parsed.protocol !== 'https:') {
+    throw new Error('Redirect target must use HTTPS');
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error('Redirect target must not contain credentials');
+  }
+  if (parsed.port && parsed.port !== '443') {
+    throw new Error('Redirect target must use the default HTTPS port');
+  }
+  return parsed.toString();
+}
+
 export interface DownloadOptions {
   maxBytes?: number;
   timeoutMs?: number;
@@ -94,6 +113,7 @@ export async function downloadPublicHttps(url: string, destPath: string, opts: D
   const maxRedirects = opts.maxRedirects ?? 5;
   const resolver = opts.resolver ?? defaultResolver;
 
+  const deadline = Date.now() + timeoutMs;
   let current = sanitiseUrl(url);
   for (let hop = 0; hop <= maxRedirects; hop++) {
     const parsed = new URL(current);
@@ -114,7 +134,11 @@ export async function downloadPublicHttps(url: string, destPath: string, opts: D
         const status = res.statusCode ?? 0;
         if (status >= 300 && status < 400 && res.headers.location) {
           res.resume();
-          resolve(new URL(res.headers.location, parsed).toString());
+          try {
+            resolve(new URL(res.headers.location, parsed).toString());
+          } catch {
+            reject(new Error('Redirect has an invalid Location header'));
+          }
           return;
         }
         if (status !== 200) {
@@ -144,12 +168,15 @@ export async function downloadPublicHttps(url: string, destPath: string, opts: D
         out.on('finish', () => resolve(null));
         res.pipe(out);
       });
+      const remaining = deadline - Date.now();
+      const timer = setTimeout(() => req.destroy(new Error('Download timed out')), Math.max(remaining, 0));
+      req.on('close', () => clearTimeout(timer));
       req.on('timeout', () => req.destroy(new Error('Download timed out')));
       req.on('error', reject);
     });
 
     if (redirect === null) return;
-    current = sanitiseUrl(redirect);
+    current = checkRedirectTarget(redirect);
   }
   throw new Error('Too many redirects');
 }
