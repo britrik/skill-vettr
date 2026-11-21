@@ -18,7 +18,7 @@ import { DependencyAnalyzer } from './analyzers/dependency-analyzer.js';
 import { sanitisePath, getAllowedRoots, truncateEvidence } from './utils/sanitise.js';
 import { parseVettrignore, isExcluded } from './utils/vettrignore.js';
 
-const VERSION = '2.0.5';
+const VERSION = '2.0.6';
 
 const TEXT_EXTENSIONS = new Set([
   '.ts', '.js', '.mjs', '.cjs', '.mts', '.cts', '.jsx', '.tsx',
@@ -106,6 +106,10 @@ export class VettrEngine {
 
       fileCount++;
       totalLines += content.split('\n').length;
+
+      if (!CODE_EXTENSIONS.has(ext)) {
+        findings.push(...this.patternAnalyzer.analyze(file, content, false));
+      }
 
       // Code files: AST analysis + regex for non-structural patterns
       if (CODE_EXTENSIONS.has(ext)) {
