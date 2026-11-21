@@ -84,7 +84,7 @@ export const MIN_GIT_FOR_RESOLVE_PIN: [number, number] = [2, 37];
 
 /** Throw unless `git --version` output names a git new enough to honour `http.curloptResolve`. */
 export function assertGitSupportsResolvePin(versionOutput: string): void {
-  const match = /git version (\d+)\.(\d+)/.exec(versionOutput);
+  const match = /^git version (\d+)\.(\d+)/.exec(versionOutput);
   const [minMajor, minMinor] = MIN_GIT_FOR_RESOLVE_PIN;
   if (!match) {
     throw new Error('Could not determine the git version; refusing to clone without an address pin');
