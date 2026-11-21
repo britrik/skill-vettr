@@ -1,4 +1,4 @@
-# skill-vettr v2.0.5
+# skill-vettr v2.0.6
 
 Static analysis security scanner for OpenClaw skills. Analyses code before installation to detect common threats.
 
