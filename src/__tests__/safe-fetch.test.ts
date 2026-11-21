@@ -2,7 +2,9 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
-import { assertGitSupportsResolvePin, checkRedirectTarget, gitResolvePin, isPublicAddress, resolvePublicHost, downloadPublicHttps } from '../utils/safe-fetch.js';
+import fs from 'node:fs';
+import zlib from 'node:zlib';
+import { assertGitSupportsResolvePin, checkRedirectTarget, gitResolvePin, gunzipCapped, isPublicAddress, resolvePublicHost, downloadPublicHttps } from '../utils/safe-fetch.js';
 
 describe('isPublicAddress', () => {
   it('rejects loopback, private, link-local and metadata addresses', () => {
@@ -80,10 +82,17 @@ describe('checkRedirectTarget', () => {
 });
 
 describe('gitResolvePin', () => {
-  it('pins the host to every validated address on port 443', () => {
+  it('pins the host to every validated IPv4 address on port 443, preferring IPv4', () => {
     assert.equal(
-      gitResolvePin('example.com', ['93.184.216.34', '2606:2800:220:1:248:1893:25c8:1946']),
-      'example.com:443:93.184.216.34,2606:2800:220:1:248:1893:25c8:1946',
+      gitResolvePin('example.com', ['93.184.216.34', '2606:2800:220:1:248:1893:25c8:1946', '93.184.216.35']),
+      'example.com:443:93.184.216.34,93.184.216.35',
+    );
+  });
+
+  it('brackets IPv6 addresses when the host has no IPv4 address', () => {
+    assert.equal(
+      gitResolvePin('example.com', ['2606:2800:220:1:248:1893:25c8:1946']),
+      'example.com:443:[2606:2800:220:1:248:1893:25c8:1946]',
     );
   });
 
@@ -104,5 +113,21 @@ describe('assertGitSupportsResolvePin', () => {
     assert.throws(() => assertGitSupportsResolvePin('git version 2.36.6'), /ignores http.curloptResolve/);
     assert.throws(() => assertGitSupportsResolvePin('git version 1.9.1'), /ignores http.curloptResolve/);
     assert.throws(() => assertGitSupportsResolvePin('something else'), /Could not determine/);
+  });
+});
+
+describe('gunzipCapped', () => {
+  it('decompresses within the limit and refuses archives that expand past it', async () => {
+    const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'vettr-gz-'));
+    try {
+      const gz = path.join(dir, 'a.gz');
+      await fs.promises.writeFile(gz, zlib.gzipSync(Buffer.alloc(64 * 1024)));
+      await gunzipCapped(gz, path.join(dir, 'ok.tar'), 128 * 1024);
+      assert.equal((await fs.promises.stat(path.join(dir, 'ok.tar'))).size, 64 * 1024);
+      await assert.rejects(gunzipCapped(gz, path.join(dir, 'big.tar'), 16 * 1024), /expands to more than/);
+      assert.equal(fs.existsSync(path.join(dir, 'big.tar')), false);
+    } finally {
+      await fs.promises.rm(dir, { recursive: true, force: true });
+    }
   });
 });
