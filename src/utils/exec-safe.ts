@@ -10,14 +10,12 @@ export interface ExecResult {
 
 const ALLOWED_COMMANDS = new Set([
   'git',
-  'curl',
   'tar',
   'clawhub',
 ]);
 
 const COMMAND_TIMEOUTS: Record<string, number> = {
   git: 60_000,
-  curl: 30_000,
   tar: 10_000,
   clawhub: 60_000,
 };
@@ -56,7 +54,7 @@ export async function execSafe(
           ? process.env['PATH'] ?? ''
           : '/usr/local/bin:/usr/bin:/bin',
         HOME: process.env['HOME'] ?? process.env['USERPROFILE'] ?? '',
-        LANG: process.env['LANG'] ?? 'en_US.UTF-8',
+        ...(process.env['LANG'] ? { LANG: process.env['LANG'] } : {}),
       },
     });
 

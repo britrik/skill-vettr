@@ -11,6 +11,7 @@ import {
   getAllowedRoots,
 } from './utils/sanitise.js';
 import { execSafe } from './utils/exec-safe.js';
+import { downloadPublicHttps, resolvePublicHost } from './utils/safe-fetch.js';
 
 const DEFAULT_CONFIG: VettingConfig = {
   maxNetworkCalls: 5,
@@ -33,7 +34,7 @@ const DEFAULT_CONFIG: VettingConfig = {
 
 export default class SkillVettr implements OpenClawSkill {
   name = 'skill-vettr';
-  version = '2.0.3';
+  version = '2.0.5';
   description = 'Security vetting for third-party OpenClaw skills';
 
   private config: VettingConfig = DEFAULT_CONFIG;
@@ -83,10 +84,17 @@ export default class SkillVettr implements OpenClawSkill {
 
         // Download using safe exec
         if (sanitisedUrl.endsWith('.git')) {
-          await execSafe('git', ['-c', 'core.hooksPath=/dev/null', 'clone', '--depth', '1', sanitisedUrl, tempDir]);
+          await resolvePublicHost(new URL(sanitisedUrl).hostname);
+          await execSafe('git', [
+            '-c', 'core.hooksPath=/dev/null',
+            '-c', 'http.followRedirects=false',
+            '-c', 'protocol.allow=never',
+            '-c', 'protocol.https.allow=always',
+            'clone', '--depth', '1', sanitisedUrl, tempDir,
+          ]);
         } else {
           const tarPath = path.join(tempDir, 'skill.tar.gz');
-          await execSafe('curl', ['-fsSL', '--max-filesize', '52428800', '--max-time', '120', '-o', tarPath, sanitisedUrl]);
+          await downloadPublicHttps(sanitisedUrl, tarPath);
           await execSafe('tar', ['-xzf', tarPath, '-C', tempDir, '--no-same-owner', '--no-same-permissions']);
         }
 

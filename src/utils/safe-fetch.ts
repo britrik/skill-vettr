@@ -1,0 +1,182 @@
+import https from 'node:https';
+import dns from 'node:dns';
+import net from 'node:net';
+import fs from 'node:fs';
+import type { LookupFunction } from 'node:net';
+import { sanitiseUrl } from './sanitise.js';
+
+export type Resolver = (hostname: string) => Promise<string[]>;
+
+const defaultResolver: Resolver = async (hostname) => {
+  const results = await dns.promises.lookup(hostname, { all: true, verbatim: true });
+  return results.map((r) => r.address);
+};
+
+function ipv4ToInt(ip: string): number {
+  return ip.split('.').reduce((acc, octet) => (acc << 8) + Number(octet), 0) >>> 0;
+}
+
+const BLOCKED_IPV4_CIDRS: Array<[string, number]> = [
+  ['0.0.0.0', 8],
+  ['10.0.0.0', 8],
+  ['100.64.0.0', 10],
+  ['127.0.0.0', 8],
+  ['169.254.0.0', 16],
+  ['172.16.0.0', 12],
+  ['192.0.0.0', 24],
+  ['192.0.2.0', 24],
+  ['192.168.0.0', 16],
+  ['198.18.0.0', 15],
+  ['198.51.100.0', 24],
+  ['203.0.113.0', 24],
+  ['224.0.0.0', 4],
+  ['240.0.0.0', 4],
+];
+
+function isPublicIpv4(ip: string): boolean {
+  const value = ipv4ToInt(ip);
+  return !BLOCKED_IPV4_CIDRS.some(([base, bits]) => {
+    const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+    return (value & mask) === (ipv4ToInt(base) & mask);
+  });
+}
+
+/** True only for globally routable unicast addresses. */
+export function isPublicAddress(ip: string): boolean {
+  if (net.isIPv4(ip)) return isPublicIpv4(ip);
+  if (!net.isIPv6(ip)) return false;
+
+  const lower = ip.toLowerCase();
+  const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped?.[1]) return isPublicIpv4(mapped[1]);
+
+  if (lower === '::' || lower === '::1') return false;
+  // Only global unicast (2000::/3) is public; excludes ULA, link-local, multicast.
+  if (!/^[23]/.test(lower)) return false;
+  // Documentation (2001:db8::/32), ORCHID/benchmarking ranges and 6to4/Teredo wrap other addresses.
+  if (/^2001:0?db8:/.test(lower) || /^2001:0?0?[0-3][0-9a-f]?:/.test(lower) || lower.startsWith('2002:')) {
+    return false;
+  }
+  return true;
+}
+
+/** Resolve a hostname and return its addresses, failing if any of them is not public. */
+export async function resolvePublicHost(hostname: string, resolver: Resolver = defaultResolver): Promise<string[]> {
+  if (net.isIP(hostname)) {
+    throw new Error('IP-literal hosts are not permitted');
+  }
+  const addresses = await resolver(hostname);
+  if (addresses.length === 0) {
+    throw new Error(`Host "${hostname}" did not resolve`);
+  }
+  const blocked = addresses.find((a) => !isPublicAddress(a));
+  if (blocked) {
+    throw new Error(`Host "${hostname}" resolves to a non-public address (${blocked})`);
+  }
+  return addresses;
+}
+
+/**
+ * Validate a redirect destination. Unlike the user-supplied URL, signed download
+ * URLs carry query strings, so only the scheme, credentials and port are checked
+ * here; the host is checked by resolvePublicHost before connecting.
+ */
+export function checkRedirectTarget(target: string): string {
+  const parsed = new URL(target);
+  if (parsed.protocol !== 'https:') {
+    throw new Error('Redirect target must use HTTPS');
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error('Redirect target must not contain credentials');
+  }
+  if (parsed.port && parsed.port !== '443') {
+    throw new Error('Redirect target must use the default HTTPS port');
+  }
+  return parsed.toString();
+}
+
+export interface DownloadOptions {
+  maxBytes?: number;
+  timeoutMs?: number;
+  maxRedirects?: number;
+  resolver?: Resolver;
+}
+
+/**
+ * Download an HTTPS URL to a file. Every hop (including redirects) is re-validated with
+ * sanitiseUrl, and the connection is pinned to the address that passed the public-address
+ * check, so DNS rebinding between check and connect is not possible.
+ */
+export async function downloadPublicHttps(url: string, destPath: string, opts: DownloadOptions = {}): Promise<void> {
+  const maxBytes = opts.maxBytes ?? 50 * 1024 * 1024;
+  const timeoutMs = opts.timeoutMs ?? 120_000;
+  const maxRedirects = opts.maxRedirects ?? 5;
+  const resolver = opts.resolver ?? defaultResolver;
+
+  const deadline = Date.now() + timeoutMs;
+  let current = sanitiseUrl(url);
+  for (let hop = 0; hop <= maxRedirects; hop++) {
+    const parsed = new URL(current);
+    const [address] = await resolvePublicHost(parsed.hostname, resolver);
+    const pinned: LookupFunction = (_host, options, callback) => {
+      const family = net.isIPv6(address!) ? 6 : 4;
+      if (typeof options === 'object' && options.all) {
+        (callback as unknown as (err: null, addrs: Array<{ address: string; family: number }>) => void)(null, [
+          { address: address!, family },
+        ]);
+      } else {
+        callback(null, address!, family);
+      }
+    };
+
+    const redirect = await new Promise<string | null>((resolve, reject) => {
+      const req = https.get(parsed, { lookup: pinned, timeout: timeoutMs }, (res) => {
+        const status = res.statusCode ?? 0;
+        if (status >= 300 && status < 400 && res.headers.location) {
+          res.resume();
+          try {
+            resolve(new URL(res.headers.location, parsed).toString());
+          } catch {
+            reject(new Error('Redirect has an invalid Location header'));
+          }
+          return;
+        }
+        if (status !== 200) {
+          res.resume();
+          reject(new Error(`Download failed with HTTP ${status}`));
+          return;
+        }
+        const declared = Number(res.headers['content-length'] ?? 0);
+        if (declared > maxBytes) {
+          res.resume();
+          reject(new Error('Download exceeds maximum size'));
+          return;
+        }
+        let received = 0;
+        const out = fs.createWriteStream(destPath, { mode: 0o600 });
+        res.on('data', (chunk: Buffer) => {
+          received += chunk.length;
+          if (received > maxBytes) {
+            res.destroy(new Error('Download exceeds maximum size'));
+          }
+        });
+        res.on('error', (err) => {
+          out.destroy();
+          reject(err);
+        });
+        out.on('error', reject);
+        out.on('finish', () => resolve(null));
+        res.pipe(out);
+      });
+      const remaining = deadline - Date.now();
+      const timer = setTimeout(() => req.destroy(new Error('Download timed out')), Math.max(remaining, 0));
+      req.on('close', () => clearTimeout(timer));
+      req.on('timeout', () => req.destroy(new Error('Download timed out')));
+      req.on('error', reject);
+    });
+
+    if (redirect === null) return;
+    current = checkRedirectTarget(redirect);
+  }
+  throw new Error('Too many redirects');
+}

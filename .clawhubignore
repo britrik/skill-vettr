@@ -8,3 +8,6 @@ dist/__tests__/
 node_modules/
 .clawpatch/
 tsconfig.json
+
+# CI configuration is not part of the published skill
+.github/
