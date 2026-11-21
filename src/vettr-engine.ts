@@ -18,7 +18,7 @@ import { DependencyAnalyzer } from './analyzers/dependency-analyzer.js';
 import { sanitisePath, getAllowedRoots, truncateEvidence } from './utils/sanitise.js';
 import { parseVettrignore, isExcluded } from './utils/vettrignore.js';
 
-const VERSION = '2.0.6';
+const VERSION = '2.0.7';
 
 const TEXT_EXTENSIONS = new Set([
   '.ts', '.js', '.mjs', '.cjs', '.mts', '.cts', '.jsx', '.tsx',

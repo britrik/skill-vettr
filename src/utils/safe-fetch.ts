@@ -77,6 +77,18 @@ export async function resolvePublicHost(hostname: string, resolver: Resolver = d
 }
 
 /**
+ * Build a curl resolve entry (`host:443:addr[,addr]`) for git's `http.curloptResolve`, so git
+ * connects only to the addresses that already passed the public-address check and cannot be
+ * sent elsewhere by DNS rebinding between the check and the connection.
+ */
+export function gitResolvePin(hostname: string, addresses: string[]): string {
+  if (addresses.length === 0 || addresses.some((a) => !isPublicAddress(a))) {
+    throw new Error(`Refusing to pin "${hostname}" to a non-public or empty address list`);
+  }
+  return `${hostname}:443:${addresses.join(',')}`;
+}
+
+/**
  * Validate a redirect destination. Unlike the user-supplied URL, signed download
  * URLs carry query strings, so only the scheme, credentials and port are checked
  * here; the host is checked by resolvePublicHost before connecting.
