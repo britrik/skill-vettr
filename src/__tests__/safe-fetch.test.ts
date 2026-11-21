@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
-import { checkRedirectTarget, isPublicAddress, resolvePublicHost, downloadPublicHttps } from '../utils/safe-fetch.js';
+import { checkRedirectTarget, gitResolvePin, isPublicAddress, resolvePublicHost, downloadPublicHttps } from '../utils/safe-fetch.js';
 
 describe('isPublicAddress', () => {
   it('rejects loopback, private, link-local and metadata addresses', () => {
@@ -76,5 +76,19 @@ describe('checkRedirectTarget', () => {
     assert.throws(() => checkRedirectTarget('http://example.com/a.tgz'), /HTTPS/);
     assert.throws(() => checkRedirectTarget('https://user:pw@example.com/a.tgz'), /credentials/);
     assert.throws(() => checkRedirectTarget('https://example.com:8443/a.tgz'), /port/);
+  });
+});
+
+describe('gitResolvePin', () => {
+  it('pins the host to every validated address on port 443', () => {
+    assert.equal(
+      gitResolvePin('example.com', ['93.184.216.34', '2606:2800:220:1:248:1893:25c8:1946']),
+      'example.com:443:93.184.216.34,2606:2800:220:1:248:1893:25c8:1946',
+    );
+  });
+
+  it('refuses an empty or non-public address list', () => {
+    assert.throws(() => gitResolvePin('example.com', []), /non-public or empty/);
+    assert.throws(() => gitResolvePin('example.com', ['93.184.216.34', '10.0.0.1']), /non-public or empty/);
   });
 });

@@ -23,7 +23,7 @@ const COMMAND_TIMEOUTS: Record<string, number> = {
 export async function execSafe(
   command: string,
   args: string[],
-  opts: { cwd?: string; timeout?: number } = {},
+  opts: { cwd?: string; timeout?: number; env?: Record<string, string> } = {},
 ): Promise<ExecResult> {
   if (!ALLOWED_COMMANDS.has(command)) {
     throw new Error(`Command "${command}" is not permitted`);
@@ -55,6 +55,7 @@ export async function execSafe(
           : '/usr/local/bin:/usr/bin:/bin',
         HOME: process.env['HOME'] ?? process.env['USERPROFILE'] ?? '',
         ...(process.env['LANG'] ? { LANG: process.env['LANG'] } : {}),
+        ...opts.env,
       },
     });
 

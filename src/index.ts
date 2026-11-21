@@ -11,7 +11,7 @@ import {
   getAllowedRoots,
 } from './utils/sanitise.js';
 import { execSafe } from './utils/exec-safe.js';
-import { downloadPublicHttps, resolvePublicHost } from './utils/safe-fetch.js';
+import { downloadPublicHttps, gitResolvePin, resolvePublicHost } from './utils/safe-fetch.js';
 
 const DEFAULT_CONFIG: VettingConfig = {
   maxNetworkCalls: 5,
@@ -34,7 +34,7 @@ const DEFAULT_CONFIG: VettingConfig = {
 
 export default class SkillVettr implements OpenClawSkill {
   name = 'skill-vettr';
-  version = '2.0.6';
+  version = '2.0.7';
   description = 'Security vetting for third-party OpenClaw skills';
 
   private config: VettingConfig = DEFAULT_CONFIG;
@@ -84,14 +84,23 @@ export default class SkillVettr implements OpenClawSkill {
 
         // Download using safe exec
         if (sanitisedUrl.endsWith('.git')) {
-          await resolvePublicHost(new URL(sanitisedUrl).hostname);
+          const parsedGitUrl = new URL(sanitisedUrl);
+          if (parsedGitUrl.port && parsedGitUrl.port !== '443') {
+            throw new Error('Git URLs must use the default HTTPS port');
+          }
+          const addresses = await resolvePublicHost(parsedGitUrl.hostname);
           await execSafe('git', [
             '-c', 'core.hooksPath=/dev/null',
             '-c', 'http.followRedirects=false',
+            '-c', `http.curloptResolve=${gitResolvePin(parsedGitUrl.hostname, addresses)}`,
             '-c', 'protocol.allow=never',
             '-c', 'protocol.https.allow=always',
             'clone', '--depth', '1', sanitisedUrl, tempDir,
-          ]);
+          ], {
+            // Ignore user and system git config so url.insteadOf rewrites, proxies and
+            // credential helpers cannot redirect the clone or attach credentials.
+            env: { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0' },
+          });
         } else {
           const tarPath = path.join(tempDir, 'skill.tar.gz');
           await downloadPublicHttps(sanitisedUrl, tarPath);
