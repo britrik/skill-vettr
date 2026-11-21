@@ -2,6 +2,10 @@ import https from 'node:https';
 import dns from 'node:dns';
 import net from 'node:net';
 import fs from 'node:fs';
+import path from 'node:path';
+import zlib from 'node:zlib';
+import { Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import type { LookupFunction } from 'node:net';
 import { sanitiseUrl } from './sanitise.js';
 
@@ -76,16 +80,64 @@ export async function resolvePublicHost(hostname: string, resolver: Resolver = d
   return addresses;
 }
 
+/** Git versions before 2.37 silently ignore `http.curloptResolve`, which would undo the address pin. */
+export const MIN_GIT_FOR_RESOLVE_PIN: [number, number] = [2, 37];
+
+/** Throw unless `git --version` output names a git new enough to honour `http.curloptResolve`. */
+export function assertGitSupportsResolvePin(versionOutput: string): void {
+  const match = /^git version (\d+)\.(\d+)/.exec(versionOutput);
+  const [minMajor, minMinor] = MIN_GIT_FOR_RESOLVE_PIN;
+  if (!match) {
+    throw new Error('Could not determine the git version; refusing to clone without an address pin');
+  }
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  if (major < minMajor || (major === minMajor && minor < minMinor)) {
+    throw new Error(
+      `git ${major}.${minor} ignores http.curloptResolve; git ${minMajor}.${minMinor} or later is required to clone .git URLs`,
+    );
+  }
+}
+
 /**
- * Build a curl resolve entry (`host:443:addr[,addr]`) for git's `http.curloptResolve`, so git
- * connects only to the addresses that already passed the public-address check and cannot be
- * sent elsewhere by DNS rebinding between the check and the connection.
+ * Build a curl resolve entry for git's `http.curloptResolve`, so git connects only to addresses
+ * that already passed the public-address check and cannot be sent elsewhere by DNS rebinding
+ * between the check and the connection. IPv4 answers are preferred: an IPv6 entry makes curl
+ * reject the whole option on builds or hosts without IPv6, so IPv6 is used (bracketed, as curl's
+ * resolve syntax requires) only when the host has no IPv4 address.
  */
 export function gitResolvePin(hostname: string, addresses: string[]): string {
   if (addresses.length === 0 || addresses.some((a) => !isPublicAddress(a))) {
     throw new Error(`Refusing to pin "${hostname}" to a non-public or empty address list`);
   }
-  return `${hostname}:443:${addresses.join(',')}`;
+  const ipv4 = addresses.filter((a) => net.isIPv4(a));
+  const pinned = ipv4.length > 0 ? ipv4 : addresses.map((a) => `[${a}]`);
+  return `${hostname}:443:${pinned.join(',')}`;
+}
+
+/**
+ * Decompress a gzip file to `destPath`, aborting once the output passes `maxBytes`. The
+ * decompressed tar's size bounds what `tar` can write, so a small archive cannot expand into
+ * an unbounded amount of disk.
+ */
+export async function gunzipCapped(srcPath: string, destPath: string, maxBytes = 200 * 1024 * 1024): Promise<void> {
+  let total = 0;
+  const limiter = new Transform({
+    transform(chunk: Buffer, _enc, cb) {
+      total += chunk.length;
+      if (total > maxBytes) {
+        cb(new Error(`Archive expands to more than ${maxBytes} bytes`));
+        return;
+      }
+      cb(null, chunk);
+    },
+  });
+  try {
+    await pipeline(fs.createReadStream(srcPath), zlib.createGunzip(), limiter, fs.createWriteStream(destPath, { mode: 0o600 }));
+  } catch (err) {
+    await fs.promises.rm(destPath, { force: true });
+    throw err;
+  }
 }
 
 /**
@@ -115,9 +167,10 @@ export interface DownloadOptions {
 }
 
 /**
- * Download an HTTPS URL to a file. Every hop (including redirects) is re-validated with
- * sanitiseUrl, and the connection is pinned to the address that passed the public-address
- * check, so DNS rebinding between check and connect is not possible.
+ * Download an HTTPS URL to a file. The initial URL is validated with sanitiseUrl; each redirect
+ * target is validated with checkRedirectTarget (HTTPS, no credentials, default port). Every hop's
+ * host must resolve to public addresses, and the connection is pinned to the address that passed
+ * that check, so DNS rebinding between check and connect is not possible.
  */
 export async function downloadPublicHttps(url: string, destPath: string, opts: DownloadOptions = {}): Promise<void> {
   const maxBytes = opts.maxBytes ?? 50 * 1024 * 1024;
@@ -191,4 +244,29 @@ export async function downloadPublicHttps(url: string, destPath: string, opts: D
     current = checkRedirectTarget(redirect);
   }
   throw new Error('Too many redirects');
+}
+
+/**
+ * Throw if the files under `dir` add up to more than `maxBytes` of logical size. A tar can hold
+ * sparse members whose declared size is far larger than their stored bytes, and the scanner
+ * reads every file in full, so the extracted tree is checked as well as the archive. Symlinks
+ * are counted by their own size and never followed.
+ */
+export async function assertTreeWithinLimit(dir: string, maxBytes = 200 * 1024 * 1024): Promise<void> {
+  let total = 0;
+  const pending = [dir];
+  while (pending.length > 0) {
+    const current = pending.pop() as string;
+    for (const entry of await fs.promises.readdir(current, { withFileTypes: true })) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(full);
+        continue;
+      }
+      total += (await fs.promises.lstat(full)).size;
+      if (total > maxBytes) {
+        throw new Error(`Extracted skill is larger than ${maxBytes} bytes`);
+      }
+    }
+  }
 }

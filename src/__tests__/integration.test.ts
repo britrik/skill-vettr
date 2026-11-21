@@ -106,7 +106,7 @@ describe('VettrEngine integration', () => {
     assert.ok(report.riskScore < 20, `Expected low risk, got ${report.riskScore}`);
     assert.ok(['SAFE', 'LOW'].includes(report.riskLevel), `Expected SAFE or LOW, got ${report.riskLevel}`);
     assert.equal(report.recommendation, 'INSTALL');
-    assert.equal(report.vettrVersion, '2.0.7');
+    assert.equal(report.vettrVersion, '2.0.8');
     assert.ok(report.metadata.checksumSha256);
     assert.ok(report.metadata.fileCount >= 2);
   });
