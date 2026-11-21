@@ -18,7 +18,7 @@ import { DependencyAnalyzer } from './analyzers/dependency-analyzer.js';
 import { sanitisePath, getAllowedRoots, truncateEvidence } from './utils/sanitise.js';
 import { parseVettrignore, isExcluded } from './utils/vettrignore.js';
 
-const VERSION = '2.0.3';
+const VERSION = '2.0.5';
 
 const TEXT_EXTENSIONS = new Set([
   '.ts', '.js', '.mjs', '.cjs', '.mts', '.cts', '.jsx', '.tsx',
@@ -70,12 +70,24 @@ export class VettrEngine {
     const networkCalls: NetworkCall[] = [];
     let manifest: SkillManifest = { name: 'unknown', version: '0.0.0' };
 
-    // Load .vettrignore if present
+    // A .vettrignore inside the scanned skill is controlled by the skill's author,
+    // so it is only honoured when the caller opts in with trustVettrignore.
     const { patterns: ignorePatterns, findings: ignoreFindings } =
       await this.loadVettrignore(resolvedPath, tools);
     findings.push(...ignoreFindings);
 
-    const files = await this.collectFiles(resolvedPath, tools, undefined, ignorePatterns);
+    const excludedPaths: string[] = [];
+    const files = await this.collectFiles(resolvedPath, tools, undefined, ignorePatterns, excludedPaths);
+    if (excludedPaths.length > 0) {
+      findings.push({
+        id: crypto.randomBytes(8).toString('hex'),
+        severity: 'WARNING',
+        category: 'PERMISSION_RISK',
+        message: `${excludedPaths.length} path(s) excluded from analysis by a trusted .vettrignore`,
+        file: path.join(resolvedPath, '.vettrignore'),
+        evidence: excludedPaths.slice(0, 10).join(', '),
+      });
+    }
 
     for (const file of files) {
       if (file.includes('node_modules')) continue;
@@ -179,14 +191,14 @@ export class VettrEngine {
     tools: ToolsInterface,
     rootDir?: string,
     ignorePatterns?: string[],
+    excludedPaths?: string[],
   ): Promise<string[]> {
     const results: string[] = [];
     const entries = await tools.readdir(dir);
     const effectiveRoot = rootDir ?? dir;
 
     for (const entry of entries) {
-      if (entry.startsWith('.')) continue;
-      if (entry === 'node_modules') continue;
+      if (entry === '.git' || entry === 'node_modules') continue;
 
       const fullPath = path.join(dir, entry);
 
@@ -216,11 +228,12 @@ export class VettrEngine {
         // Check vettrignore exclusion
         const relativePath = path.relative(effectiveRoot, fullPath);
         if (ignorePatterns && ignorePatterns.length > 0 && isExcluded(relativePath, ignorePatterns)) {
+          excludedPaths?.push(relativePath);
           continue;
         }
 
         if (stats.isDirectory()) {
-          const subFiles = await this.collectFiles(fullPath, tools, effectiveRoot, ignorePatterns);
+          const subFiles = await this.collectFiles(fullPath, tools, effectiveRoot, ignorePatterns, excludedPaths);
           results.push(...subFiles);
         } else if (stats.isFile()) {
           results.push(fullPath);
@@ -242,7 +255,22 @@ export class VettrEngine {
 
     try {
       const content = await tools.readFile(ignorePath);
+
+      if (this.config.trustVettrignore !== true) {
+        findings.push({
+          id: crypto.randomBytes(8).toString('hex'),
+          severity: 'WARNING',
+          category: 'PERMISSION_RISK',
+          message:
+            'Scanned skill ships a .vettrignore; it was not applied because exclusions supplied by the scanned skill are untrusted (set trustVettrignore to honour it)',
+          file: ignorePath,
+          evidence: truncateEvidence(content),
+        });
+        return { patterns: [], findings };
+      }
+
       const result = parseVettrignore(content);
+      const patterns: string[] = [];
 
       for (const warning of result.warnings) {
         findings.push({
@@ -255,7 +283,23 @@ export class VettrEngine {
         });
       }
 
-      return { patterns: result.patterns, findings };
+      for (const pattern of result.patterns) {
+        const reason = rejectIgnorePattern(pattern);
+        if (reason) {
+          findings.push({
+            id: crypto.randomBytes(8).toString('hex'),
+            severity: 'WARNING',
+            category: 'PERMISSION_RISK',
+            message: `.vettrignore pattern "${truncateEvidence(pattern, 40)}" rejected: ${reason}`,
+            file: ignorePath,
+            evidence: truncateEvidence(pattern),
+          });
+        } else {
+          patterns.push(pattern);
+        }
+      }
+
+      return { patterns, findings };
     } catch {
       // .vettrignore missing or unreadable — scan everything
       // Only add a finding if the file exists but is unreadable
@@ -412,4 +456,22 @@ export class VettrEngine {
 
     return hash.digest('hex');
   }
+}
+
+const PROTECTED_SCAN_FILES = ['SKILL.md', 'skill.md', 'package.json', 'package-lock.json'];
+const OVERBROAD_PATTERNS = new Set(['', '*', '**', '**/*', '*/', '**/', '.', './', '/']);
+
+function rejectIgnorePattern(pattern: string): string | null {
+  const normalised = pattern.trim().replace(/^\.?\//, '');
+  if (OVERBROAD_PATTERNS.has(normalised) || /^\*+\/?$/.test(normalised)) {
+    return 'pattern would exclude the whole skill';
+  }
+  if (normalised.includes('..')) {
+    return 'pattern contains a parent-directory reference';
+  }
+  const protectedHit = PROTECTED_SCAN_FILES.find((file) => isExcluded(file, [pattern]));
+  if (protectedHit) {
+    return `pattern would exclude ${protectedHit}, which is always scanned`;
+  }
+  return null;
 }
