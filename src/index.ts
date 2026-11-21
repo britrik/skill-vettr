@@ -12,7 +12,7 @@ import {
   getAllowedRoots,
 } from './utils/sanitise.js';
 import { execSafe } from './utils/exec-safe.js';
-import { assertGitSupportsResolvePin, downloadPublicHttps, gitResolvePin, gunzipCapped, resolvePublicHost } from './utils/safe-fetch.js';
+import { assertGitSupportsResolvePin, assertTreeWithinLimit, downloadPublicHttps, gitResolvePin, gunzipCapped, resolvePublicHost } from './utils/safe-fetch.js';
 
 const DEFAULT_CONFIG: VettingConfig = {
   maxNetworkCalls: 5,
@@ -121,6 +121,7 @@ export default class SkillVettr implements OpenClawSkill {
           await execSafe('tar', ['-xf', tarballPath, '-C', tempDir, '--no-same-owner', '--no-same-permissions']);
           await fs.rm(tarballPath, { force: true });
         }
+        await assertTreeWithinLimit(tempDir);
 
         // Validate that downloaded content is actually a skill
         const hasManifest = await findSkillManifest(tempDir, ctx.tools);

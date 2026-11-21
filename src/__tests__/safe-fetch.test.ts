@@ -4,7 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import zlib from 'node:zlib';
-import { assertGitSupportsResolvePin, checkRedirectTarget, gitResolvePin, gunzipCapped, isPublicAddress, resolvePublicHost, downloadPublicHttps } from '../utils/safe-fetch.js';
+import { execFileSync } from 'node:child_process';
+import { assertGitSupportsResolvePin, assertTreeWithinLimit, checkRedirectTarget, gitResolvePin, gunzipCapped, isPublicAddress, resolvePublicHost, downloadPublicHttps } from '../utils/safe-fetch.js';
 
 describe('isPublicAddress', () => {
   it('rejects loopback, private, link-local and metadata addresses', () => {
@@ -126,6 +127,30 @@ describe('gunzipCapped', () => {
       assert.equal((await fs.promises.stat(path.join(dir, 'ok.tar'))).size, 64 * 1024);
       await assert.rejects(gunzipCapped(gz, path.join(dir, 'big.tar'), 16 * 1024), /expands to more than/);
       assert.equal(fs.existsSync(path.join(dir, 'big.tar')), false);
+    } finally {
+      await fs.promises.rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('assertTreeWithinLimit', () => {
+  it('refuses a tar whose sparse member declares more than the limit', async () => {
+    const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'vettr-sparse-'));
+    try {
+      const src = path.join(dir, 'src');
+      const out = path.join(dir, 'out');
+      await fs.promises.mkdir(src);
+      await fs.promises.mkdir(out);
+      await fs.promises.writeFile(path.join(src, 'SKILL.md'), '# skill\n');
+      const handle = await fs.promises.open(path.join(src, 'hole.bin'), 'w');
+      await handle.truncate(64 * 1024 * 1024);
+      await handle.close();
+      const tar = path.join(dir, 'sparse.tar');
+      execFileSync('tar', ['-cSf', tar, '-C', src, '.']);
+      assert.ok((await fs.promises.stat(tar)).size < 1024 * 1024, 'fixture tar should be small');
+      execFileSync('tar', ['-xf', tar, '-C', out]);
+      await assert.rejects(assertTreeWithinLimit(out, 16 * 1024 * 1024), /larger than/);
+      await assertTreeWithinLimit(out, 128 * 1024 * 1024);
     } finally {
       await fs.promises.rm(dir, { recursive: true, force: true });
     }

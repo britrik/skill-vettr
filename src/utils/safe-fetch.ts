@@ -2,6 +2,7 @@ import https from 'node:https';
 import dns from 'node:dns';
 import net from 'node:net';
 import fs from 'node:fs';
+import path from 'node:path';
 import zlib from 'node:zlib';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -243,4 +244,29 @@ export async function downloadPublicHttps(url: string, destPath: string, opts: D
     current = checkRedirectTarget(redirect);
   }
   throw new Error('Too many redirects');
+}
+
+/**
+ * Throw if the files under `dir` add up to more than `maxBytes` of logical size. A tar can hold
+ * sparse members whose declared size is far larger than their stored bytes, and the scanner
+ * reads every file in full, so the extracted tree is checked as well as the archive. Symlinks
+ * are counted by their own size and never followed.
+ */
+export async function assertTreeWithinLimit(dir: string, maxBytes = 200 * 1024 * 1024): Promise<void> {
+  let total = 0;
+  const pending = [dir];
+  while (pending.length > 0) {
+    const current = pending.pop() as string;
+    for (const entry of await fs.promises.readdir(current, { withFileTypes: true })) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(full);
+        continue;
+      }
+      total += (await fs.promises.lstat(full)).size;
+      if (total > maxBytes) {
+        throw new Error(`Extracted skill is larger than ${maxBytes} bytes`);
+      }
+    }
+  }
 }
