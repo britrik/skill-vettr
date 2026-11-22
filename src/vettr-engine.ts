@@ -162,7 +162,10 @@ export class VettrEngine {
         }
       }
 
-      if (maliciousDb && LOCKFILE_NAMES.has(path.basename(file))) {
+      // npm ignores package-lock.json when npm-shrinkwrap.json sits next to it.
+      const shadowedLock = path.basename(file) === 'package-lock.json' &&
+        files.includes(path.join(path.dirname(file), 'npm-shrinkwrap.json'));
+      if (maliciousDb && LOCKFILE_NAMES.has(path.basename(file)) && !shadowedLock) {
         try {
           const lock = JSON.parse(content) as Record<string, never>;
           findings.push(...this.dependencyAnalyzer.analyzeLockfile(lock, file, maliciousDb));
