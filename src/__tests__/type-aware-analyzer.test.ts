@@ -115,6 +115,13 @@ describe('TypeAwareAnalyzer taint rules', () => {
     assert.equal(mutated.length, 1);
   });
 
+  it('falls back to whole-object taint when the object is aliased', () => {
+    const findings = run({
+      'index.ts': handler("    const job = { command: 'ls', user: args.user };\n    const alias = job;\n    alias.command = args.cmd;\n    exec(job.command);", "import { exec } from 'child_process';"),
+    });
+    assert.equal(findings.length, 1);
+  });
+
   it('falls back to whole-object taint for computed keys', () => {
     const findings = run({
       'index.ts': handler("    const k = 'command';\n    const job = { command: 'ls', [k]: args.cmd };\n    exec(job.command);", "import { exec } from 'child_process';"),

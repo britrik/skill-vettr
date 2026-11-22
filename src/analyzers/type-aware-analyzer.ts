@@ -323,6 +323,15 @@ class TaintPass {
   }
 
   private collectMutatedObjects(sf: SourceFile): void {
+    // An object that escapes (aliased, passed, returned) can be mutated through another name.
+    for (const id of sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
+      const parent = id.getParent();
+      if (Node.isVariableDeclaration(parent) && parent.getNameNode() === id) continue;
+      if ((Node.isPropertyAccessExpression(parent) || Node.isElementAccessExpression(parent)) && parent.getExpression() === id) continue;
+      if (Node.isPropertyAccessExpression(parent) && parent.getNameNode() === id) continue;
+      const sym = this.symbolOf(id);
+      if (sym) this.mutated.add(sym);
+    }
     for (const bin of sf.getDescendantsOfKind(SyntaxKind.BinaryExpression)) {
       if (!ASSIGNMENT_OPERATORS.has(bin.getOperatorToken().getKind())) continue;
       let target: Node = bin.getLeft();
