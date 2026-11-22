@@ -72,6 +72,11 @@ const MAX_PROPAGATION_ROUNDS = 25;
 const MAX_EXPRESSION_DEPTH = 40;
 const MAX_FLOW_EVIDENCE = 200;
 
+/** Own-property lookup, so names like `hasOwnProperty` or `constructor` never match a table entry. */
+function ownLookup<T>(table: Record<string, T> | undefined, key: string): T | undefined {
+  return table && Object.hasOwn(table, key) ? table[key] : undefined;
+}
+
 function normaliseModule(spec: string): string {
   const bare = spec.replace(/^node:/, '');
   return bare === 'fs/promises' ? 'fs' : bare;
@@ -437,7 +442,7 @@ class TaintPass {
       return f ? `${f} -> ${callee.getText()}()` : null;
     }
     const ref = this.resolveImported(callee);
-    if (ref && PASS_THROUGH_FUNCTIONS[ref.module]?.has(ref.name)) {
+    if (ref && ownLookup(PASS_THROUGH_FUNCTIONS, ref.module)?.has(ref.name)) {
       const f = argFlow();
       return f ? `${f} -> ${ref.module}.${ref.name}()` : null;
     }
@@ -538,7 +543,7 @@ class TaintPass {
       label = 'fetch';
     } else {
       const ref = this.resolveImported(callee);
-      kind = ref ? SINKS[ref.module]?.[ref.name] : undefined;
+      kind = ref ? ownLookup(ownLookup(SINKS, ref.module), ref.name) : undefined;
       label = ref ? `${ref.module}.${ref.name}` : '';
     }
     if (!kind) return null;

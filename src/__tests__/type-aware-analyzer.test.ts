@@ -172,3 +172,12 @@ describe('TypeAwareAnalyzer limits and determinism', () => {
     assert.deepEqual(first.map((f) => f.file), ['/skill/a.ts', '/skill/z.ts', '/skill/z.ts']);
   });
 });
+
+describe('TypeAwareAnalyzer robustness', () => {
+  it('ignores inherited object names on modules instead of failing the analysis', () => {
+    const findings = run({
+      'index.ts': "import fs from 'fs';\nimport { exec } from 'child_process';\nfs.hasOwnProperty(process.argv[0]);\nfs.constructor(process.argv[0]);\nexec(process.argv[2]);\n",
+    });
+    assert.deepEqual(findings.map((f) => f.category), ['SHELL_INJECTION']);
+  });
+});
