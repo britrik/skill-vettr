@@ -172,6 +172,8 @@ export class TypeAwareAnalyzer {
           }
           continue;
         }
+        // `#name` imports map through package.json "imports", not dependencies.
+        if (spec.startsWith('#')) continue;
         if (spec.startsWith('node:') || BUILTINS.has(spec) || BUILTINS.has(spec.split('/')[0]!)) continue;
         if (input.manifest === null) continue;
         const pkg = packageNameOf(spec);
@@ -207,12 +209,17 @@ function compareFindings(a: Finding, b: Finding): number {
 function collectImports(sf: SourceFile): Array<{ spec: string; line: number }> {
   const out: Array<{ spec: string; line: number }> = [];
   for (const decl of sf.getImportDeclarations()) {
-    if (decl.isTypeOnly()) continue;
+    const named = decl.getNamedImports();
+    const onlyInlineTypes = !decl.getDefaultImport() && !decl.getNamespaceImport() && named.length > 0 &&
+      named.every((n) => n.isTypeOnly());
+    if (decl.isTypeOnly() || onlyInlineTypes) continue;
     out.push({ spec: decl.getModuleSpecifierValue(), line: decl.getStartLineNumber() });
   }
   for (const decl of sf.getExportDeclarations()) {
     const spec = decl.getModuleSpecifierValue();
-    if (spec && !decl.isTypeOnly()) out.push({ spec, line: decl.getStartLineNumber() });
+    const named = decl.getNamedExports();
+    const onlyInlineTypes = named.length > 0 && named.every((n) => n.isTypeOnly());
+    if (spec && !decl.isTypeOnly() && !onlyInlineTypes) out.push({ spec, line: decl.getStartLineNumber() });
   }
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const callee = call.getExpression();

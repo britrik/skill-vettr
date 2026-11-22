@@ -120,6 +120,10 @@ describe('TypeAwareAnalyzer import rules', () => {
           "import yaml from 'yaml';",
           "import type { T } from 'types-only';",
           "const lodash = require('lodash/fp');",
+          "import internal from '#internal/util';",
+          "import { type A, type B } from 'inline-types-only';",
+          "export { type C } from 'reexport-types-only';",
+          "import { type D, value } from 'mixed-import';",
         ].join('\n'),
       },
       { manifest: { name: 'skill', dependencies: { yaml: '1' }, peerDependencies: { lodash: '4' } } },
@@ -127,9 +131,10 @@ describe('TypeAwareAnalyzer import rules', () => {
     assert.deepEqual(findings.map((f) => f.message), [
       'Import of undeclared package: axios',
       'Import of undeclared package: @scope/pkg',
+      'Import of undeclared package: mixed-import',
     ]);
     assert.ok(findings.every((f) => f.severity === 'WARNING' && f.cwe === 'CWE-829' && f.category === 'DEPENDENCY_RISK'));
-    assert.deepEqual(findings.map((f) => f.line), [1, 2]);
+    assert.deepEqual(findings.map((f) => f.line), [1, 2, 13]);
   });
 
   it('resolves relative imports with extensions, index files and .js to .ts mapping', () => {
