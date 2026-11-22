@@ -19,7 +19,8 @@ export const DEFAULT_MALICIOUS_PACKAGES_DB_PATH = path.join(
 const INDEX_SCHEMA = 1;
 const MAX_TARBALL_BYTES = 300 * 1024 * 1024;
 const MAX_UNPACKED_BYTES = 4 * 1024 * 1024 * 1024;
-const MAX_ADVISORY_BYTES = 1024 * 1024;
+// Some advisories list thousands of versions (one is over 1 MiB), so the per-file cap is generous.
+const MAX_ADVISORY_BYTES = 64 * 1024 * 1024;
 const NPM_ADVISORY_PATH = /^[^/]+\/osv\/malicious\/npm\/.+\/MAL-[^/]+\.json$/;
 
 export interface MaliciousPackageEntry {

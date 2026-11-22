@@ -189,3 +189,30 @@ describe('dataset archive', () => {
     await assert.rejects(loadMaliciousPackagesIndex(dbPath), /unsupported format/);
   });
 });
+
+describe('large advisories', () => {
+  it('keeps an advisory file larger than 1 MiB', async () => {
+    const work = await fs.mkdtemp(path.join(os.tmpdir(), 'vettr-mal-big-'));
+    try {
+      const repo = path.join(work, 'repo');
+      const dir = path.join(repo, 'osv/malicious/npm/big');
+      await fs.mkdir(dir, { recursive: true });
+      const versions = Array.from({ length: 120_000 }, (_, i) => `1.0.${i}`);
+      await fs.writeFile(path.join(dir, 'MAL-2026-0001.json'), JSON.stringify({
+        id: 'MAL-2026-0001',
+        affected: [{ package: { name: 'big', ecosystem: 'npm' }, versions }],
+      }));
+      const git = (...args: string[]) =>
+        execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { cwd: repo });
+      git('init', '-q');
+      git('add', '.');
+      git('commit', '-q', '-m', 'big');
+      const tarball = path.join(work, 'big.tar.gz');
+      git('archive', '--format=tar.gz', '--prefix=mp/', '-o', tarball, 'HEAD');
+      const idx = await buildIndexFromTarball(tarball);
+      assert.ok(idx.packages['big'] && matchExactVersion(idx, 'big', '1.0.119999'));
+    } finally {
+      await fs.rm(work, { recursive: true, force: true });
+    }
+  });
+});
