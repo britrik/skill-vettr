@@ -199,9 +199,10 @@ export class DependencyAnalyzer {
   }
 }
 
-/** Lockfile entries without `resolved` come from the registry; git and file: sources do not. */
+/** False for lockfile entries installed from git, a local path or a local tarball rather than a registry. */
 function fromRegistry(resolved: string | undefined): boolean {
-  return typeof resolved !== 'string' || /^https?:\/\//.test(resolved);
+  if (typeof resolved !== 'string') return true;
+  return !/^(file:|link:|git[+:]|github:|gitlab:|bitbucket:|\.{1,2}\/|[a-zA-Z]:\\)/.test(resolved);
 }
 
 /** Resolve `"alias": "npm:real-name@^1.0.0"` to the package that actually gets installed. */

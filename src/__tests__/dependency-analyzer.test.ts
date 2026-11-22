@@ -180,6 +180,11 @@ describe('DependencyAnalyzer with the OpenSSF malicious-packages index', () => {
     assert.deepEqual(analyzer.analyzeLockfile(lock, '/test/package-lock.json', db), []);
   });
 
+  it('keeps lockfile entries resolved to registry-relative tarball paths', () => {
+    const lock = { lockfileVersion: 1, dependencies: { hijacked: { version: '1.2.3', resolved: '/hijacked/-/hijacked-1.2.3.tgz' } } };
+    assert.equal(analyzer.analyzeLockfile(lock, '/test/package-lock.json', db).length, 1);
+  });
+
   it('checks nested v1 lockfile dependencies and aliases', () => {
     const lock = {
       lockfileVersion: 1,
