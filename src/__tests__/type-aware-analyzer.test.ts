@@ -91,6 +91,13 @@ describe('TypeAwareAnalyzer taint rules', () => {
     assert.deepEqual(findings, []);
   });
 
+  it('follows compound assignments', () => {
+    const findings = run({
+      'index.ts': handler("    let cmd = 'ls ';\n    cmd += args.dir;\n    exec(cmd);", "import { exec } from 'child_process';"),
+    });
+    assert.ok(findings.some((f) => f.category === 'SHELL_INJECTION'));
+  });
+
   it('terminates on cyclic assignments', () => {
     const findings = run({
       'index.ts': handler("    let a = args.x; let b = a; a = b; b = a;\n    exec(b);", "import { exec } from 'child_process';"),

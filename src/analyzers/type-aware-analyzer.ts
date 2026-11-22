@@ -68,6 +68,9 @@ const PASS_THROUGH_METHODS = new Set([
   'toLowerCase', 'toUpperCase', 'split', 'join', 'padStart', 'padEnd', 'at', 'map', 'filter', 'flat',
 ]);
 
+const ASSIGNMENT_OPERATORS = new Set([
+  SyntaxKind.EqualsToken, SyntaxKind.PlusEqualsToken, SyntaxKind.BarBarEqualsToken, SyntaxKind.QuestionQuestionEqualsToken,
+]);
 const MAX_PROPAGATION_ROUNDS = 25;
 const MAX_EXPRESSION_DEPTH = 40;
 const MAX_FLOW_EVIDENCE = 200;
@@ -338,7 +341,7 @@ class TaintPass {
         const init = node.getInitializer();
         const flow = init && this.flowOf(init);
         if (flow) changed = this.taintBinding(node.getNameNode(), flow) || changed;
-      } else if (Node.isBinaryExpression(node) && node.getOperatorToken().getKind() === SyntaxKind.EqualsToken) {
+      } else if (Node.isBinaryExpression(node) && ASSIGNMENT_OPERATORS.has(node.getOperatorToken().getKind())) {
         const flow = this.flowOf(node.getRight());
         if (flow) {
           let target: Node = node.getLeft();
