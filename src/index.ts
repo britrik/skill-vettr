@@ -31,6 +31,8 @@ const DEFAULT_CONFIG: VettingConfig = {
   blockedAuthors: [],
   blockedPackages: [],
   typosquatTargets: [],
+  typeAwareMaxFiles: 200,
+  typeAwareMaxBytes: 2_000_000,
 };
 
 export default class SkillVettr implements OpenClawSkill {

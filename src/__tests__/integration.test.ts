@@ -286,3 +286,24 @@ describe('VettrEngine integration', () => {
     );
   });
 });
+
+describe('VettrEngine type-aware analysis', () => {
+  it('adds no type-aware findings for the safe fixture', async () => {
+    const report = await new VettrEngine(config).vetSkill(path.join(tempFixturesDir, 'safe-skill'), tools);
+    assert.ok(!report.findings.some((f) => f.message.startsWith('Untrusted input') || f.message.startsWith('Import of')));
+  });
+
+  it('reports handler input reaching exec with its flow', async () => {
+    const skillDir = path.join(tempFixturesDir, 'taint-skill');
+    await copyDir(path.join(tempFixturesDir, 'safe-skill'), skillDir);
+    await fs.writeFile(
+      path.join(skillDir, 'index.ts'),
+      "import { exec as run } from 'child_process';\n" +
+        "export default { onLoad(ctx) { ctx.commands.register('/x', (args) => { run(`echo ${args.msg}`); }); } };\n",
+    );
+    const report = await new VettrEngine(config).vetSkill(skillDir, tools);
+    const f = report.findings.find((x) => x.message === 'Untrusted input reaches a child process: child_process.exec()');
+    assert.equal(f?.evidence, 'args -> args.msg -> run(...)');
+    assert.equal(f?.line, 2);
+  });
+});
