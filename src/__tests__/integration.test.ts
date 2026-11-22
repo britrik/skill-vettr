@@ -369,6 +369,13 @@ describe('VettrEngine with the OpenSSF malicious-packages index', () => {
     const legacy = await new VettrEngine({ ...config, maliciousPackagesDbPath: await writeHijackedDb(legacyDir) })
       .vetSkill(legacyDir, tools);
     assert.ok(!legacy.findings.some((f) => f.message.includes('OpenSSF')));
+
+    await fs.writeFile(path.join(legacyDir, 'package-lock.json'), lock('1.2.2'));
+    await fs.writeFile(path.join(legacyDir, 'npm-shrinkwrap.json'), JSON.stringify({ dependencies: { hijacked: { version: '1.2.3' } } }));
+    const flagged = await new VettrEngine({ ...config, maliciousPackagesDbPath: await writeHijackedDb(legacyDir) })
+      .vetSkill(legacyDir, tools);
+    const hits = flagged.findings.filter((f) => f.message.includes('OpenSSF'));
+    assert.deepEqual(hits.map((f) => path.basename(f.file)), ['npm-shrinkwrap.json']);
     const report = await new VettrEngine({ ...config, maliciousPackagesDbPath: await writeHijackedDb(skillDir) })
       .vetSkill(skillDir, tools);
     assert.ok(!report.findings.some((f) => f.message.includes('OpenSSF')));
