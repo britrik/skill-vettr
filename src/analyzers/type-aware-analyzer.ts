@@ -245,6 +245,8 @@ function resolvesRelative(fromDir: string, spec: string, existing: Set<string>):
 
 class TaintPass {
   private tainted = new Map<ts.Symbol, string>();
+  /** Objects with a property assigned somewhere, so their fields can't be read from the initializer alone. */
+  private mutated = new Set<ts.Symbol>();
   private checker: ts.TypeChecker;
 
   constructor(project: Project, private sourceFiles: SourceFile[]) {
@@ -254,6 +256,7 @@ class TaintPass {
   run(): Finding[] {
     const files = this.sourceFiles.filter((sf) => !sf.isDeclarationFile());
     for (const sf of files) this.seedHandlerParameters(sf);
+    for (const sf of files) this.collectMutatedObjects(sf);
 
     // Propagate until nothing changes; the round cap stops cyclic assignments from looping.
     for (let round = 0; round < MAX_PROPAGATION_ROUNDS; round++) {
@@ -301,6 +304,51 @@ class TaintPass {
       }
     }
     return changed;
+  }
+
+  private collectMutatedObjects(sf: SourceFile): void {
+    for (const bin of sf.getDescendantsOfKind(SyntaxKind.BinaryExpression)) {
+      if (!ASSIGNMENT_OPERATORS.has(bin.getOperatorToken().getKind())) continue;
+      let target: Node = bin.getLeft();
+      if (!Node.isPropertyAccessExpression(target) && !Node.isElementAccessExpression(target)) continue;
+      while (Node.isPropertyAccessExpression(target) || Node.isElementAccessExpression(target)) target = target.getExpression();
+      const sym = Node.isIdentifier(target) ? this.symbolOf(target) : undefined;
+      if (sym) this.mutated.add(sym);
+    }
+  }
+
+  /**
+   * Field-precise read of `obj.key` when `obj` is a never-mutated const object literal: the flow of
+   * that one property, or undefined when it can't be determined from the literal.
+   */
+  private fieldFlow(expr: Node, depth: number): string | null | undefined {
+    if (!Node.isPropertyAccessExpression(expr) && !Node.isElementAccessExpression(expr)) return undefined;
+    const receiver = expr.getExpression();
+    let key: string | undefined;
+    if (Node.isPropertyAccessExpression(expr)) key = expr.getName();
+    else {
+      const arg = expr.getArgumentExpression();
+      if (arg && (Node.isStringLiteral(arg) || Node.isNoSubstitutionTemplateLiteral(arg))) key = arg.getLiteralValue();
+    }
+    if (key === undefined || !Node.isIdentifier(receiver)) return undefined;
+    const sym = this.symbolOf(receiver);
+    if (!sym || this.mutated.has(sym)) return undefined;
+    const decls = sym.getDeclarations() ?? [];
+    if (decls.length !== 1) return undefined;
+    const decl = this.wrap(receiver, decls[0]!);
+    if (!Node.isVariableDeclaration(decl) || decl.getVariableStatement()?.getDeclarationKind() !== 'const') return undefined;
+    const init = decl.getInitializer();
+    if (!init || !Node.isObjectLiteralExpression(init)) return undefined;
+    const props = init.getProperties();
+    if (props.some((p) => Node.isSpreadAssignment(p))) return undefined;
+    for (const prop of props) {
+      if (Node.isPropertyAssignment(prop) && prop.getName() === key) return this.flowOf(prop.getInitializer()!, depth + 1);
+      if (Node.isShorthandPropertyAssignment(prop) && prop.getName() === key) {
+        const value = this.checker.getShorthandAssignmentValueSymbol(prop.compilerNode);
+        return (value && this.tainted.get(value)) ?? null;
+      }
+    }
+    return undefined;
   }
 
   private seedHandlerParameters(sf: SourceFile): void {
@@ -387,6 +435,8 @@ class TaintPass {
     }
     if (Node.isPropertyAccessExpression(expr) || Node.isElementAccessExpression(expr)) {
       if (isProcessArgv(expr)) return 'process.argv';
+      const field = this.fieldFlow(expr, depth);
+      if (field !== undefined) return field ? `${field} -> ${shortText(expr)}` : null;
       const inner = next(expr.getExpression());
       return inner ? `${inner} -> ${shortText(expr)}` : null;
     }

@@ -98,6 +98,20 @@ describe('TypeAwareAnalyzer taint rules', () => {
     assert.ok(findings.some((f) => f.category === 'SHELL_INJECTION'));
   });
 
+  it('keeps fields of a const object literal apart', () => {
+    const findings = run({
+      'index.ts': handler(
+        "    const job = { command: 'ls', user: args.user };\n    exec(job.command);\n    exec(job['user']);",
+        "import { exec } from 'child_process';",
+      ),
+    });
+    assert.deepEqual(findings.map((f) => f.line), [6]);
+    const mutated = run({
+      'index.ts': handler("    const job = { command: 'ls' };\n    job.command = args.cmd;\n    exec(job.command);", "import { exec } from 'child_process';"),
+    });
+    assert.equal(mutated.length, 1);
+  });
+
   it('terminates on cyclic assignments', () => {
     const findings = run({
       'index.ts': handler("    let a = args.x; let b = a; a = b; b = a;\n    exec(b);", "import { exec } from 'child_process';"),
