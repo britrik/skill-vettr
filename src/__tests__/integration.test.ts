@@ -106,7 +106,7 @@ describe('VettrEngine integration', () => {
     assert.ok(report.riskScore < 20, `Expected low risk, got ${report.riskScore}`);
     assert.ok(['SAFE', 'LOW'].includes(report.riskLevel), `Expected SAFE or LOW, got ${report.riskLevel}`);
     assert.equal(report.recommendation, 'INSTALL');
-    assert.equal(report.vettrVersion, '2.0.8');
+    assert.equal(report.vettrVersion, '2.1.0');
     assert.ok(report.metadata.checksumSha256);
     assert.ok(report.metadata.fileCount >= 2);
   });
@@ -284,5 +284,62 @@ describe('VettrEngine integration', () => {
       shellFindings.length > 0,
       'Without .vettrignore, vendor/bad.ts should produce SHELL_INJECTION findings',
     );
+  });
+});
+
+describe('VettrEngine with the OpenSSF malicious-packages index', () => {
+  it('reports the dataset as disabled when no path is configured', async () => {
+    const report = await new VettrEngine(config).vetSkill(path.join(tempFixturesDir, 'safe-skill'), tools);
+    assert.deepEqual(report.metadata.maliciousPackagesDb, { status: 'disabled' });
+  });
+
+  it('reports a configured but unsynced dataset without failing the scan', async () => {
+    const engine = new VettrEngine({ ...config, maliciousPackagesDbPath: path.join(tempFixturesDir, 'missing.json') });
+    const report = await engine.vetSkill(path.join(tempFixturesDir, 'safe-skill'), tools);
+    assert.equal(report.metadata.maliciousPackagesDb?.status, 'not-synced');
+    assert.equal(report.recommendation, 'INSTALL');
+  });
+
+  it('blocks a skill whose manifest or lockfile pulls a malicious package', async () => {
+    const skillDir = path.join(tempFixturesDir, 'openssf-skill');
+    await copyDir(path.join(tempFixturesDir, 'safe-skill'), skillDir);
+    await fs.writeFile(
+      path.join(skillDir, 'package.json'),
+      JSON.stringify({ name: 'hello-world', version: '1.0.0', dependencies: { lodash: '^4.17.21', 'evil-pkg': '^1.0.0' } }),
+    );
+    await fs.writeFile(
+      path.join(skillDir, 'package-lock.json'),
+      JSON.stringify({ lockfileVersion: 3, packages: { 'node_modules/lodash/node_modules/hijacked': { version: '1.2.3' } } }),
+    );
+    const dbPath = path.join(tempFixturesDir, 'malicious-db.json');
+    const syncedAt = new Date(Date.now() - 200 * 3_600_000).toISOString();
+    await fs.writeFile(
+      dbPath,
+      JSON.stringify({
+        schema: 1,
+        source: 'ossf/malicious-packages',
+        commit: 'c504f23264a165b3c11afb5c71429bc8bcbf2f49',
+        syncedAt,
+        advisoryCount: 2,
+        packages: {
+          'evil-pkg': { ids: ['MAL-2024-0001'], all: true },
+          hijacked: { ids: ['MAL-2024-0002'], versions: ['1.2.3'] },
+        },
+      }),
+    );
+
+    const report = await new VettrEngine({ ...config, maliciousPackagesDbPath: dbPath }).vetSkill(skillDir, tools);
+
+    assert.deepEqual(report.metadata.maliciousPackagesDb, {
+      status: 'loaded',
+      commit: 'c504f23264a165b3c11afb5c71429bc8bcbf2f49',
+      syncedAt,
+      advisoryCount: 2,
+      stale: true,
+    });
+    const openssf = report.findings.filter((f) => f.message.includes('OpenSSF'));
+    assert.deepEqual(openssf.map((f) => path.basename(f.file)).sort(), ['package-lock.json', 'package.json']);
+    assert.ok(openssf.every((f) => f.severity === 'CRITICAL'));
+    assert.equal(report.recommendation, 'BLOCK');
   });
 });
