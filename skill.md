@@ -1,6 +1,6 @@
 ---
 name: vettr
-description: "Static analysis scanner for third-party OpenClaw skills. Parses JS/TS with tree-sitter to flag eval/exec/spawn and obfuscation, checks package.json and package-lock.json dependencies against the OpenSSF malicious-packages dataset and for lifecycle scripts, checks manifest metadata for typosquatted or blocked names, matches prompt-injection and credential-path patterns in every scanned text file (code, Markdown, JSON, YAML, TXT; prompt-injection checks include code comments), and lists literal fetch() URLs. Optional autoVet (off by default) hooks skill:pre-install and can block an install or ask the user to approve it. Local scans need no network; /skill:vet-sync downloads the OpenSSF dataset from codeload.github.com, /skill:vet-url downloads over HTTPS (public hosts only) and /skill:vet-clawhub runs the clawhub CLI. Use when vetting a skill before installing it."
+description: "Static analysis scanner for third-party OpenClaw skills. Parses JS/TS with tree-sitter to flag eval/exec/spawn and obfuscation, traces command/hook handler input to child_process, fs-write and network calls with ts-morph, flags unresolved or undeclared imports, checks package.json and package-lock.json dependencies against the OpenSSF malicious-packages dataset and for lifecycle scripts, checks manifest metadata for typosquatted or blocked names, matches prompt-injection and credential-path patterns in every scanned text file (code, Markdown, JSON, YAML, TXT; prompt-injection checks include code comments), and lists literal fetch() URLs. Optional autoVet (off by default) hooks skill:pre-install and can block an install or ask the user to approve it. Local scans need no network; /skill:vet-sync downloads the OpenSSF dataset from codeload.github.com, /skill:vet-url downloads over HTTPS (public hosts only) and /skill:vet-clawhub runs the clawhub CLI. Use when vetting a skill before installing it."
 version: "2.1.0"
 author: britrik
 tags: ["security", "scanner", "vetting", "analysis", "static-analysis"]
@@ -83,6 +83,8 @@ The skill never reads credentials; credential paths such as `~/.ssh` appear in i
 | Encoded names | Regex | Unicode/hex-escaped "eval", "exec" |
 | Credential paths | Regex | Cloud and SSH credential directory references, system credential store access |
 | Network calls | AST | fetch() with literal URLs (checked against allowlist) |
+| Tainted sinks | ts-morph | Command/hook handler arguments or process.argv reaching exec/spawn (CRITICAL), fs writes or fetch/http (WARNING), with the flow as evidence |
+| Unresolved imports | ts-morph | Relative imports to missing files, bare imports not declared in package.json |
 | Malicious deps | OpenSSF dataset | npm `MAL-` advisories matched against package.json ranges and lockfile versions |
 | Risky deps | Config | Built-in and blocked packages, lifecycle scripts, git/http deps |
 | Typosquatting | Levenshtein | Skill names within edit distance 2 of targets |
@@ -132,6 +134,10 @@ To allow vetting paths under the current working directory, set `allowCwd: true`
 | `maliciousPackagesDbPath` | `~/.openclaw/skill-vettr/malicious-packages-npm.json` | Index written by `/skill:vet-sync`; `""` turns the check off |
 | `maliciousPackagesAutoSync` | false | Sync before vetting when the index is missing or older than `maliciousPackagesRefreshHours` (24) |
 | `maliciousPackagesMaxAgeHours` | 168 | Reports mark the dataset stale after this many hours |
+
+### Type-aware analysis limits
+
+`typeAwareMaxFiles` (default 200) and `typeAwareMaxBytes` (default 2000000) cap the code loaded into the in-memory ts-morph project. Above either, the type-aware rules are skipped and the report gets one INFO finding saying so.
 
 ## `.vettrignore`
 

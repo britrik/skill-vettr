@@ -18,6 +18,7 @@ npm test
 skill-vettr scans a skill's source code, dependencies, and metadata for security issues. It uses:
 
 - **tree-sitter AST parsing** for structural code analysis (eval, exec, spawn, dynamic require, prototype pollution, etc.)
+- **Type-aware rules** ([ts-morph](https://github.com/dsherret/ts-morph), one in-memory project per scan): untrusted input reaching child processes, filesystem writes or network requests, and imports that don't resolve or aren't declared in `package.json`
 - **Regex patterns** for things AST can't detect (prompt injection, homoglyph attacks, encoded function names)
 - **Dependency analysis** for known malicious packages (the [OpenSSF malicious-packages](https://github.com/ossf/malicious-packages) dataset plus a built-in list), suspicious prefixes, lifecycle scripts
 - **Metadata analysis** for typosquatting (Levenshtein distance), dangerous permissions, blocked authors
@@ -114,6 +115,24 @@ Add to `~/.openclaw/config.json`:
 | `maliciousPackagesAutoSync` | false | Sync before vetting when the index is missing or older than `maliciousPackagesRefreshHours` |
 | `maliciousPackagesRefreshHours` | `maliciousPatternsRefreshHours` (24) | Index age that triggers an automatic sync |
 | `maliciousPackagesMaxAgeHours` | 168 | Index age at which reports mark the dataset stale |
+| `typeAwareMaxFiles` | 200 | Skip the type-aware rules (one INFO finding) above this many code files |
+| `typeAwareMaxBytes` | 2000000 | Skip the type-aware rules (one INFO finding) above this many bytes of code |
+
+## Type-aware rules
+
+After the per-file scan, skill-vettr loads every code file into one in-memory ts-morph project (no disk access, no lib files, nothing executed or emitted) and resolves names with the TypeScript checker, so aliases (`import { exec as run }`), namespace and default imports, `require()` destructuring and shadowed names are handled.
+
+| Rule | Severity | Category | CWE |
+|------|----------|----------|-----|
+| Untrusted input reaches `child_process` (`exec`, `execSync`, `spawn`, `spawnSync`, `execFile`, `execFileSync`, `fork`) | CRITICAL | SHELL_INJECTION | CWE-78 |
+| Untrusted input reaches an `fs` write path (`writeFile`, `appendFile`, `createWriteStream`, `rm`, `unlink` and their sync forms) | WARNING | PATH_TRAVERSAL | CWE-22 |
+| Untrusted input reaches `fetch` or `http`/`https` `request`/`get` | WARNING | NETWORK_RISK | CWE-918 |
+| Relative import that doesn't resolve to a file in the skill | WARNING | DEPENDENCY_RISK | CWE-829 |
+| Bare import of a package missing from the nearest `package.json` (`dependencies`, `devDependencies`, `peerDependencies`, `optionalDependencies`; built-ins and `@openclaw/sdk` are exempt) | WARNING | DEPENDENCY_RISK | CWE-829 |
+
+Untrusted input is the parameters of handlers passed to `*.commands.register(name, handler)` and `*.hooks.on(name, handler)`, and `process.argv`. Taint follows assignments, destructuring, property access, template literals, concatenation, `String()`, `JSON.stringify()`, `path.join()`/`path.resolve()`, common string methods, and arguments passed to functions declared in the skill. The evidence shows the flow, e.g. `args -> args.path -> cmd -> exec(...)`.
+
+Limits: taint does not follow values through object fields, return values, class members or across module boundaries, so it under-reports rather than over-reports.
 
 ## Risk Levels
 

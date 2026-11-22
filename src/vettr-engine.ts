@@ -16,6 +16,7 @@ import { AstAnalyzer } from './analyzers/ast-analyzer.js';
 import { PatternAnalyzer } from './analyzers/pattern-analyzer.js';
 import { MetadataAnalyzer } from './analyzers/metadata-analyzer.js';
 import { DependencyAnalyzer } from './analyzers/dependency-analyzer.js';
+import { CodeFile, RootManifest, TypeAwareAnalyzer } from './analyzers/type-aware-analyzer.js';
 import { sanitisePath, getAllowedRoots, truncateEvidence } from './utils/sanitise.js';
 import { parseVettrignore, isExcluded } from './utils/vettrignore.js';
 import { MaliciousPackagesIndex, indexAgeHours, loadMaliciousPackagesIndex } from './utils/malicious-db.js';
@@ -30,6 +31,8 @@ const TEXT_EXTENSIONS = new Set([
 ]);
 
 const CODE_EXTENSIONS = new Set(['.ts', '.js', '.mjs', '.cjs', '.mts', '.cts', '.jsx', '.tsx']);
+const DEFAULT_TYPE_AWARE_MAX_FILES = 200;
+const DEFAULT_TYPE_AWARE_MAX_BYTES = 2_000_000;
 
 const CATEGORY_WEIGHTS: Record<FindingCategory, number> = {
   PROMPT_INJECTION: 1.5,
@@ -48,6 +51,7 @@ export class VettrEngine {
   private patternAnalyzer: PatternAnalyzer;
   private metadataAnalyzer: MetadataAnalyzer;
   private dependencyAnalyzer: DependencyAnalyzer;
+  private typeAwareAnalyzer: TypeAwareAnalyzer;
 
   constructor(config: VettingConfig) {
     this.config = config;
@@ -55,6 +59,7 @@ export class VettrEngine {
     this.patternAnalyzer = new PatternAnalyzer();
     this.metadataAnalyzer = new MetadataAnalyzer();
     this.dependencyAnalyzer = new DependencyAnalyzer();
+    this.typeAwareAnalyzer = new TypeAwareAnalyzer();
   }
 
   async vetSkill(skillPath: string, tools: ToolsInterface): Promise<VettingReport> {
@@ -109,6 +114,9 @@ export class VettrEngine {
       });
     }
 
+    const codeFiles: CodeFile[] = [];
+    const manifests: Record<string, RootManifest> = {};
+
     for (const file of files) {
       if (file.includes('node_modules')) continue;
 
@@ -133,6 +141,7 @@ export class VettrEngine {
 
       // Code files: AST analysis + regex for non-structural patterns
       if (CODE_EXTENSIONS.has(ext)) {
+        codeFiles.push({ path: file, content });
         const astFindings = this.astAnalyzer.analyze(file, content, ext);
         findings.push(...astFindings);
 
@@ -163,6 +172,9 @@ export class VettrEngine {
       if (file.endsWith('package.json')) {
         try {
           const pkg = JSON.parse(content) as Record<string, unknown>;
+          if (pkg && typeof pkg === 'object' && path.basename(file) === 'package.json') {
+            manifests[path.dirname(file)] = pkg as RootManifest;
+          }
           const depFindings = this.dependencyAnalyzer.analyze(pkg, resolvedPath, this.config, maliciousDb);
           findings.push(...depFindings);
         } catch {
@@ -196,6 +208,15 @@ export class VettrEngine {
         findings.push(...metaFindings);
       }
     }
+
+    findings.push(...this.typeAwareAnalyzer.analyze({
+      rootDir: resolvedPath,
+      codeFiles,
+      allFiles: files,
+      manifests,
+      maxFiles: this.config.typeAwareMaxFiles ?? DEFAULT_TYPE_AWARE_MAX_FILES,
+      maxBytes: this.config.typeAwareMaxBytes ?? DEFAULT_TYPE_AWARE_MAX_BYTES,
+    }));
 
     const riskScore = this.calculateRiskScore(findings, networkCalls);
     const riskLevel = this.getRiskLevel(riskScore);

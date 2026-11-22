@@ -92,6 +92,10 @@ export interface VettingConfig {
   maliciousPackagesRefreshHours?: number;
   /** Reports mark the dataset stale after this many hours. Defaults to 168. */
   maliciousPackagesMaxAgeHours?: number;
+  /** Skip type-aware analysis (one INFO finding) above this many code files. Defaults to 200. */
+  typeAwareMaxFiles?: number;
+  /** Skip type-aware analysis (one INFO finding) above this many bytes of code. Defaults to 2 MB. */
+  typeAwareMaxBytes?: number;
   /** Honour a .vettrignore shipped inside the scanned skill. Off by default: the scanned skill controls that file. */
   trustVettrignore?: boolean;
 }
