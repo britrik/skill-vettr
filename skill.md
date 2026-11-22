@@ -130,7 +130,7 @@ To allow vetting paths under the current working directory, set `allowCwd: true`
 | Field | Default | Description |
 |-------|---------|-------------|
 | `maliciousPackagesDbPath` | `~/.openclaw/skill-vettr/malicious-packages-npm.json` | Index written by `/skill:vet-sync`; `""` turns the check off |
-| `maliciousPackagesAutoSync` | false | Sync before vetting when the index is missing or older than `maliciousPatternsRefreshHours` (24) |
+| `maliciousPackagesAutoSync` | false | Sync before vetting when the index is missing or older than `maliciousPackagesRefreshHours` (24) |
 | `maliciousPackagesMaxAgeHours` | 168 | Reports mark the dataset stale after this many hours |
 
 ## `.vettrignore`

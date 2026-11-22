@@ -86,8 +86,10 @@ export interface VettingConfig {
    * /skill:vet-sync. Unset disables the check.
    */
   maliciousPackagesDbPath?: string;
-  /** Sync the dataset before vetting when it is missing or older than maliciousPatternsRefreshHours. */
+  /** Sync the dataset before vetting when it is missing or older than maliciousPackagesRefreshHours. */
   maliciousPackagesAutoSync?: boolean;
+  /** Index age that triggers an automatic sync. Falls back to maliciousPatternsRefreshHours. */
+  maliciousPackagesRefreshHours?: number;
   /** Reports mark the dataset stale after this many hours. Defaults to 168. */
   maliciousPackagesMaxAgeHours?: number;
   /** Honour a .vettrignore shipped inside the scanned skill. Off by default: the scanned skill controls that file. */

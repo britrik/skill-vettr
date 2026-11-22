@@ -13,6 +13,7 @@ import {
   matchDeclaredDependency,
   matchExactVersion,
   osvEventsToRanges,
+  refreshMaliciousPackagesIfStale,
   syncMaliciousPackages,
 } from '../utils/malicious-db.js';
 
@@ -203,6 +204,25 @@ describe('dataset archive', () => {
       syncMaliciousPackages({ dbPath, download: async (_u, dest) => fs.writeFile(dest, 'not a tarball') }),
     );
     assert.equal(await fs.readFile(dbPath, 'utf8'), before);
+  });
+
+  it('auto-sync refreshes only a missing or old index', async () => {
+    const dbPath = path.join(work, 'auto.json');
+    let downloads = 0;
+    const download = async (_u: string, dest: string) => {
+      downloads++;
+      await fs.copyFile(tarball, dest);
+    };
+    assert.equal(await refreshMaliciousPackagesIfStale({ dbPath, maxAgeHours: 24, download }), true);
+    assert.equal(await refreshMaliciousPackagesIfStale({ dbPath, maxAgeHours: 24, download }), false);
+    const old = JSON.parse(await fs.readFile(dbPath, 'utf8'));
+    old.syncedAt = new Date(Date.now() - 25 * 3_600_000).toISOString();
+    await fs.writeFile(dbPath, JSON.stringify(old));
+    assert.equal(await refreshMaliciousPackagesIfStale({ dbPath, maxAgeHours: 24, download }), true);
+    assert.equal(downloads, 2);
+    await fs.writeFile(dbPath, '{broken');
+    assert.equal(await refreshMaliciousPackagesIfStale({ dbPath, maxAgeHours: 24, download }), true);
+    assert.equal(downloads, 3);
   });
 
   it('rejects an index file with an unknown format', async () => {

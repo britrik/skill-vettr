@@ -395,6 +395,19 @@ export function matchDeclaredDependency(
 }
 
 /** Hours since the index was synced, or Infinity when its timestamp is unreadable. */
+/**
+ * Sync when the index is missing, unreadable or at least `maxAgeHours` old. Returns whether it synced;
+ * a failed sync throws and leaves the existing index in place.
+ */
+export async function refreshMaliciousPackagesIfStale(
+  opts: SyncOptions & { dbPath: string; maxAgeHours: number },
+): Promise<boolean> {
+  const current = await loadMaliciousPackagesIndex(opts.dbPath).catch(() => null);
+  if (current && indexAgeHours(current) < opts.maxAgeHours) return false;
+  await syncMaliciousPackages(opts);
+  return true;
+}
+
 export function indexAgeHours(index: MaliciousPackagesIndex, now = Date.now()): number {
   const synced = Date.parse(index.syncedAt);
   return Number.isFinite(synced) ? (now - synced) / 3_600_000 : Infinity;

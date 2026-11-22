@@ -14,8 +14,7 @@ import {
 import { execSafe } from './utils/exec-safe.js';
 import {
   DEFAULT_MALICIOUS_PACKAGES_DB_PATH,
-  indexAgeHours,
-  loadMaliciousPackagesIndex,
+  refreshMaliciousPackagesIfStale,
   syncMaliciousPackages,
 } from './utils/malicious-db.js';
 import { assertGitSupportsResolvePin, assertTreeWithinLimit, downloadPublicHttps, gitResolvePin, gunzipCapped, resolvePublicHost } from './utils/safe-fetch.js';
@@ -36,6 +35,7 @@ const DEFAULT_CONFIG: VettingConfig = {
   maliciousPatternsRefreshHours: 24,
   maliciousPackagesDbPath: DEFAULT_MALICIOUS_PACKAGES_DB_PATH,
   maliciousPackagesAutoSync: false,
+  maliciousPackagesRefreshHours: 24,
   maliciousPackagesMaxAgeHours: 168,
   blockedAuthors: [],
   blockedPackages: [],
@@ -245,10 +245,11 @@ export default class SkillVettr implements OpenClawSkill {
     const dbPath = this.config.maliciousPackagesDbPath;
     if (!this.config.maliciousPackagesAutoSync || !dbPath) return;
     try {
-      const current = await loadMaliciousPackagesIndex(dbPath).catch(() => null);
-      if (current && indexAgeHours(current) < this.config.maliciousPatternsRefreshHours) return;
-      ctx.ui.showProgress('Refreshing OpenSSF malicious-packages dataset...');
-      await syncMaliciousPackages({ dbPath });
+      ctx.ui.showProgress('Checking the OpenSSF malicious-packages dataset...');
+      await refreshMaliciousPackagesIfStale({
+        dbPath,
+        maxAgeHours: this.config.maliciousPackagesRefreshHours ?? this.config.maliciousPatternsRefreshHours,
+      });
     } catch (err) {
       ctx.ui.notify(`Malicious-packages sync failed, using the existing dataset: ${err instanceof Error ? err.message : 'Unknown'}`);
     }
