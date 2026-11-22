@@ -52,9 +52,10 @@ export class DependencyAnalyzer {
     };
 
     if (maliciousDb) {
+      // npm lets optionalDependencies override the same name in dependencies.
       const declared = {
-        ...(packageJson.optionalDependencies ?? {}),
         ...deps,
+        ...(packageJson.optionalDependencies ?? {}),
       };
       for (const [name, spec] of Object.entries(declared)) {
         if (typeof spec !== 'string') continue;

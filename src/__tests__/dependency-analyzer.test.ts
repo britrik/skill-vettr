@@ -127,6 +127,16 @@ describe('DependencyAnalyzer with the OpenSSF malicious-packages index', () => {
     assert.equal(f?.evidence, 'innocent@npm:evil-pkg@^2.0.0');
   });
 
+  it('checks the optionalDependencies spec that overrides dependencies', () => {
+    const findings = analyzer.analyze(
+      { dependencies: { hijacked: '1.2.2' }, optionalDependencies: { hijacked: '1.2.3' } },
+      '/test',
+      BASE_CONFIG,
+      db,
+    );
+    assert.equal(findings.find((x) => x.message.includes('OpenSSF'))?.evidence, 'hijacked@1.2.3');
+  });
+
   it('skips git and file specs', () => {
     const findings = analyzer.analyze(
       { dependencies: { 'evil-pkg': 'github:someone/evil-pkg', hijacked: 'file:../hijacked' } },
