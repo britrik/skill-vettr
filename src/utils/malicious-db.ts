@@ -169,6 +169,10 @@ export async function* readTarGz(
   let pending: { path: string; size: number; type: string; keep: boolean } | null = null;
   let skip = 0;
   let nextPath: string | undefined;
+  // Chunks are queued until `need` bytes are available, so a large entry is copied once, not per chunk.
+  let queued: Buffer[] = [];
+  let queuedBytes = 0;
+  let need = 0;
 
   for await (const chunk of stream as AsyncIterable<Buffer>) {
     total += chunk.length;
@@ -176,7 +180,13 @@ export async function* readTarGz(
       stream.destroy();
       throw new Error(`Dataset archive expands to more than ${maxBytes} bytes`);
     }
-    buffer = buffer.length === 0 ? chunk : Buffer.concat([buffer, chunk]);
+    queued.push(chunk);
+    queuedBytes += chunk.length;
+    if (buffer.length + queuedBytes < need) continue;
+    buffer = buffer.length === 0 && queued.length === 1 ? chunk : Buffer.concat([buffer, ...queued]);
+    queued = [];
+    queuedBytes = 0;
+    need = 0;
 
     while (true) {
       if (skip > 0) {
@@ -193,7 +203,10 @@ export async function* readTarGz(
           pending = null;
           continue;
         }
-        if (buffer.length < padded) break;
+        if (buffer.length < padded) {
+          need = padded;
+          break;
+        }
         const data = Buffer.from(buffer.subarray(0, pending.size));
         buffer = buffer.subarray(padded);
         const entry = pending;
@@ -210,7 +223,10 @@ export async function* readTarGz(
         continue;
       }
 
-      if (buffer.length < 512) break;
+      if (buffer.length < 512) {
+        need = 512;
+        break;
+      }
       const header = buffer.subarray(0, 512);
       buffer = buffer.subarray(512);
       if (header.every((b) => b === 0)) continue;
