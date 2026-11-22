@@ -96,7 +96,7 @@ export function addAdvisory(packages: Record<string, MaliciousPackageEntry>, adv
     const name = affected.package?.name;
     if (!name || affected.package?.ecosystem !== 'npm') continue;
 
-    const entry = (packages[name] ??= { ids: [] });
+    const entry = Object.hasOwn(packages, name) ? packages[name]! : (packages[name] = { ids: [] });
     if (!entry.ids.includes(advisory.id)) entry.ids.push(advisory.id);
     added = true;
 
@@ -248,7 +248,8 @@ export async function* readTarGz(
 
 /** Build the npm index from a downloaded ossf/malicious-packages tarball. */
 export async function buildIndexFromTarball(tarball: string): Promise<MaliciousPackagesIndex> {
-  const packages: Record<string, MaliciousPackageEntry> = {};
+  // Null prototype: package names such as `constructor` or `__proto__` must be plain keys.
+  const packages: Record<string, MaliciousPackageEntry> = Object.create(null);
   let commit = 'unknown';
   let advisoryCount = 0;
 

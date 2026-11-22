@@ -126,6 +126,12 @@ describe('dataset archive', () => {
       id: 'MAL-2024-0002',
       affected: [{ package: { name: longScopedName, ecosystem: 'npm' }, versions: ['1.0.0'] }],
     });
+    for (const [i, name] of ['constructor', '__proto__'].entries()) {
+      await write(`osv/malicious/npm/${name}/MAL-2024-010${i}.json`, {
+        id: `MAL-2024-010${i}`,
+        affected: [{ package: { name, ecosystem: 'npm' }, versions: ['6.6.6'] }],
+      });
+    }
     await write('osv/malicious/npm/broken/MAL-2024-0003.json', '{not json');
     await write('osv/malicious/pypi/py-evil/MAL-2024-0004.json', {
       id: 'MAL-2024-0004',
@@ -153,10 +159,21 @@ describe('dataset archive', () => {
   it('indexes npm MAL advisories and records the commit', async () => {
     const idx = await buildIndexFromTarball(tarball);
     assert.equal(idx.commit, commit);
-    assert.equal(idx.advisoryCount, 2);
-    assert.deepEqual(Object.keys(idx.packages).sort(), [longScopedName, 'evil-pkg'].sort());
+    assert.equal(idx.advisoryCount, 4);
+    assert.deepEqual(Object.keys(idx.packages).sort(), [longScopedName, 'evil-pkg', 'constructor', '__proto__'].sort());
     assert.equal(idx.packages['evil-pkg']?.all, true);
     assert.deepEqual(idx.packages[longScopedName]?.versions, ['1.0.0']);
+  });
+
+  it('indexes packages named like Object.prototype members as plain entries', async () => {
+    const idx = await buildIndexFromTarball(tarball);
+    assert.equal((({}) as Record<string, unknown>).ids, undefined);
+    const roundTripped = { ...idx, packages: JSON.parse(JSON.stringify(idx.packages)) };
+    for (const name of ['constructor', '__proto__']) {
+      assert.ok(Object.hasOwn(roundTripped.packages, name));
+      assert.deepEqual(matchExactVersion(roundTripped, name, '6.6.6')?.ids, [name === 'constructor' ? 'MAL-2024-0100' : 'MAL-2024-0101']);
+      assert.equal(matchExactVersion(roundTripped, name, '1.0.0'), null);
+    }
   });
 
   it('syncs to disk and loads the result offline', async () => {
