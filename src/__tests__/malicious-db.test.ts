@@ -88,6 +88,11 @@ describe('matching', () => {
     assert.ok(matchExactVersion(db, 'pinned', '1.4.2'));
   });
 
+  it('does not throw on non-semver lockfile versions', () => {
+    assert.equal(matchExactVersion(db, 'pinned', 'git+https://example.com/pinned.git#abc'), null);
+    assert.equal(matchExactVersion(db, 'ranged', 'file:../ranged'), null);
+  });
+
   it('does not match inherited object keys', () => {
     assert.equal(matchDeclaredDependency(db, 'constructor', '1.0.0'), null);
     assert.equal(matchExactVersion(db, '__proto__', '1.0.0'), null);

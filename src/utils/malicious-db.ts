@@ -336,9 +336,13 @@ export function matchExactVersion(
   const entry = Object.hasOwn(index.packages, name) ? index.packages[name] : undefined;
   if (!entry) return null;
   if (entry.all) return { ids: entry.ids, certainty: 'exact' };
-  const hit = affectedVersionsMatch(entry, (m, isRange) =>
-    isRange ? semver.satisfies(version, m, { includePrerelease: true }) : semver.eq(version, m, true) || version === m,
-  );
+  // Lockfiles can record git/file references instead of versions; those only match literally.
+  const valid = semver.valid(version, true);
+  const hit = affectedVersionsMatch(entry, (m, isRange) => {
+    if (!valid) return !isRange && version === m;
+    if (isRange) return semver.satisfies(valid, m, { includePrerelease: true });
+    return version === m || (semver.valid(m, true) !== null && semver.eq(valid, m, true));
+  });
   return hit ? { ids: entry.ids, certainty: 'exact' } : null;
 }
 
