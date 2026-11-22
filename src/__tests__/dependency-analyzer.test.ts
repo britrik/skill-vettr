@@ -167,6 +167,19 @@ describe('DependencyAnalyzer with the OpenSSF malicious-packages index', () => {
     assert.ok(findings.every((f) => f.severity === 'CRITICAL' && f.file === '/test/package-lock.json'));
   });
 
+  it('skips lockfile packages installed from local tarballs, links or git', () => {
+    const lock = {
+      lockfileVersion: 3,
+      packages: {
+        'node_modules/hijacked': { version: '1.2.3', resolved: 'file:vendor/hijacked-1.2.3.tgz' },
+        'node_modules/evil-pkg': { version: '0.0.1', resolved: 'git+ssh://git@github.com/me/evil-pkg.git#abc' },
+        'node_modules/linked': { name: 'evil-pkg', resolved: 'packages/evil', link: true },
+      },
+      dependencies: { hijacked: { version: '1.2.3', resolved: 'file:vendor/hijacked-1.2.3.tgz' } },
+    };
+    assert.deepEqual(analyzer.analyzeLockfile(lock, '/test/package-lock.json', db), []);
+  });
+
   it('checks nested v1 lockfile dependencies and aliases', () => {
     const lock = {
       lockfileVersion: 1,

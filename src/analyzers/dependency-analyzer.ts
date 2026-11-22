@@ -19,6 +19,8 @@ interface PackageJson {
 interface LockfileEntry {
   name?: string;
   version?: string;
+  resolved?: string;
+  link?: boolean;
   dependencies?: Record<string, LockfileEntry> | null;
 }
 
@@ -171,7 +173,7 @@ export class DependencyAnalyzer {
       for (const [key, entry] of Object.entries(lockfile.packages)) {
         if (!entry || typeof entry !== 'object' || key === '') continue;
         const idx = key.lastIndexOf('node_modules/');
-        if (idx === -1) continue;
+        if (idx === -1 || entry.link === true || !fromRegistry(entry.resolved)) continue;
         check(entry.name ?? key.slice(idx + 'node_modules/'.length), entry.version);
       }
     }
@@ -181,6 +183,10 @@ export class DependencyAnalyzer {
       for (const [name, entry] of Object.entries(deps)) {
         if (!entry || typeof entry !== 'object') continue;
         const version = entry.version;
+        if (!fromRegistry(entry.resolved)) {
+          walk(entry.dependencies, depth + 1);
+          continue;
+        }
         // v1 aliases record the real package as "npm:<name>@<version>".
         const alias = typeof version === 'string' ? resolveNpmAlias(name, version) : null;
         check(alias?.name ?? name, alias?.spec ?? version);
@@ -191,6 +197,11 @@ export class DependencyAnalyzer {
 
     return findings;
   }
+}
+
+/** Lockfile entries without `resolved` come from the registry; git and file: sources do not. */
+function fromRegistry(resolved: string | undefined): boolean {
+  return typeof resolved !== 'string' || /^https?:\/\//.test(resolved);
 }
 
 /** Resolve `"alias": "npm:real-name@^1.0.0"` to the package that actually gets installed. */
