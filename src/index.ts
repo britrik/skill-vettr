@@ -12,6 +12,11 @@ import {
   getAllowedRoots,
 } from './utils/sanitise.js';
 import { execSafe } from './utils/exec-safe.js';
+import {
+  DEFAULT_MALICIOUS_PACKAGES_DB_PATH,
+  refreshMaliciousPackagesIfStale,
+  syncMaliciousPackages,
+} from './utils/malicious-db.js';
 import { assertGitSupportsResolvePin, assertTreeWithinLimit, downloadPublicHttps, gitResolvePin, gunzipCapped, resolvePublicHost } from './utils/safe-fetch.js';
 
 const DEFAULT_CONFIG: VettingConfig = {
@@ -28,6 +33,9 @@ const DEFAULT_CONFIG: VettingConfig = {
   maxRiskScore: 50,
   checkTyposquatting: true,
   maliciousPatternsRefreshHours: 24,
+  maliciousPackagesDbPath: DEFAULT_MALICIOUS_PACKAGES_DB_PATH,
+  maliciousPackagesAutoSync: false,
+  maliciousPackagesMaxAgeHours: 168,
   blockedAuthors: [],
   blockedPackages: [],
   typosquatTargets: [],
@@ -37,7 +45,7 @@ const DEFAULT_CONFIG: VettingConfig = {
 
 export default class SkillVettr implements OpenClawSkill {
   name = 'skill-vettr';
-  version = '2.0.8';
+  version = '2.1.0';
   description = 'Security vetting for third-party OpenClaw skills';
 
   private config: VettingConfig = DEFAULT_CONFIG;
@@ -48,6 +56,20 @@ export default class SkillVettr implements OpenClawSkill {
     const userConfig = ctx.config.get<Partial<VettingConfig>>('skill-vettr', {});
     this.config = { ...DEFAULT_CONFIG, ...userConfig };
     this.engine = new VettrEngine(this.config);
+
+    // Register: /skill:vet-sync — refresh the OpenSSF malicious-packages dataset
+    ctx.commands.register('/skill:vet-sync', async () => {
+      const dbPath = this.config.maliciousPackagesDbPath;
+      if (!dbPath) return 'Malicious-packages check is disabled (maliciousPackagesDbPath is empty)';
+      try {
+        ctx.ui.showProgress('Downloading OpenSSF malicious-packages dataset...');
+        const index = await syncMaliciousPackages({ dbPath });
+        return `Synced OpenSSF malicious-packages ${index.commit.substring(0, 12)}: ` +
+          `${index.advisoryCount} npm advisories covering ${Object.keys(index.packages).length} packages`;
+      } catch (err) {
+        return `Sync failed: ${err instanceof Error ? err.message : 'Unknown error'}`;
+      }
+    });
 
     // Register: /skill:vet --path <local-path>
     ctx.commands.register('/skill:vet', async (args) => {
@@ -60,6 +82,7 @@ export default class SkillVettr implements OpenClawSkill {
       try {
         const sanitisedPath = sanitisePath(skillPath, getAllowedRoots({ allowCwd: this.config.allowCwd }));
 
+        await this.autoSyncMaliciousDb(ctx);
         ctx.ui.showProgress('Analysing skill...');
         const report = await this.engine.vetSkill(sanitisedPath, ctx.tools);
 
@@ -131,6 +154,7 @@ export default class SkillVettr implements OpenClawSkill {
           throw new Error('Downloaded content is not a valid OpenClaw skill: no SKILL.md found');
         }
 
+        await this.autoSyncMaliciousDb(ctx);
         ctx.ui.showProgress('Analysing skill...');
         const report = await this.engine.vetSkill(tempDir, ctx.tools);
 
@@ -170,6 +194,7 @@ export default class SkillVettr implements OpenClawSkill {
           throw new Error('Downloaded content is not a valid OpenClaw skill: no SKILL.md found');
         }
 
+        await this.autoSyncMaliciousDb(ctx);
         ctx.ui.showProgress('Analysing skill...');
         const report = await this.engine.vetSkill(tempDir, ctx.tools);
 
@@ -189,6 +214,7 @@ export default class SkillVettr implements OpenClawSkill {
     if (autoVet) {
       ctx.hooks.on('skill:pre-install', async (event) => {
         try {
+          await this.autoSyncMaliciousDb(ctx);
           const report = await this.engine.vetSkill(event.skillPath, ctx.tools);
 
           if (report.recommendation === 'BLOCK') {
@@ -212,6 +238,21 @@ export default class SkillVettr implements OpenClawSkill {
           ctx.ui.notify(`Vetting error: ${err instanceof Error ? err.message : 'Unknown'}`);
         }
       });
+    }
+  }
+
+  /** With maliciousPackagesAutoSync on, refresh a missing or old dataset; a failed sync keeps the old one. */
+  private async autoSyncMaliciousDb(ctx: SkillContext): Promise<void> {
+    const dbPath = this.config.maliciousPackagesDbPath;
+    if (!this.config.maliciousPackagesAutoSync || !dbPath) return;
+    try {
+      ctx.ui.showProgress('Checking the OpenSSF malicious-packages dataset...');
+      await refreshMaliciousPackagesIfStale({
+        dbPath,
+        maxAgeHours: this.config.maliciousPackagesRefreshHours ?? this.config.maliciousPatternsRefreshHours,
+      });
+    } catch (err) {
+      ctx.ui.notify(`Malicious-packages sync failed, using the existing dataset: ${err instanceof Error ? err.message : 'Unknown'}`);
     }
   }
 
@@ -253,6 +294,7 @@ export default class SkillVettr implements OpenClawSkill {
       `│  Files Analysed:      ${report.metadata.fileCount}`,
       `│  Total Lines:         ${report.metadata.totalLines}`,
       `│  Checksum (SHA-256):  ${report.metadata.checksumSha256 ? report.metadata.checksumSha256.substring(0, 16) + '...' : 'N/A'}`,
+      `│  Malicious-pkg DB:    ${this.formatMaliciousDb(report.metadata.maliciousPackagesDb)}`,
       `└─────────────────────────────────────────────────────────────`,
       ``,
     ];
@@ -310,6 +352,20 @@ export default class SkillVettr implements OpenClawSkill {
     }
 
     return lines.join('\n');
+  }
+
+  private formatMaliciousDb(info: VettingReport['metadata']['maliciousPackagesDb']): string {
+    switch (info?.status) {
+      case 'loaded':
+        return `OpenSSF ${info.commit?.substring(0, 12) ?? 'unknown'} (synced ${info.syncedAt ?? 'unknown'})` +
+          (info.stale ? ' ⚠ stale, run /skill:vet-sync' : '');
+      case 'not-synced':
+        return '⚠ not synced, run /skill:vet-sync';
+      case 'invalid':
+        return `⚠ unreadable (${info.error ?? 'unknown error'}), run /skill:vet-sync`;
+      default:
+        return 'disabled';
+    }
   }
 
   private formatRiskLevel(level: VettingReport['riskLevel']): string {

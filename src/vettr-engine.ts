@@ -8,6 +8,7 @@ import {
   SkillManifest,
   Finding,
   FindingCategory,
+  MaliciousPackagesDbInfo,
   NetworkCall,
   ToolsInterface,
 } from './types.js';
@@ -18,8 +19,11 @@ import { DependencyAnalyzer } from './analyzers/dependency-analyzer.js';
 import { CodeFile, RootManifest, TypeAwareAnalyzer } from './analyzers/type-aware-analyzer.js';
 import { sanitisePath, getAllowedRoots, truncateEvidence } from './utils/sanitise.js';
 import { parseVettrignore, isExcluded } from './utils/vettrignore.js';
+import { MaliciousPackagesIndex, indexAgeHours, loadMaliciousPackagesIndex } from './utils/malicious-db.js';
 
-const VERSION = '2.0.8';
+const VERSION = '2.1.0';
+const DEFAULT_MALICIOUS_DB_MAX_AGE_HOURS = 168;
+const LOCKFILE_NAMES = new Set(['package-lock.json', 'npm-shrinkwrap.json']);
 
 const TEXT_EXTENSIONS = new Set([
   '.ts', '.js', '.mjs', '.cjs', '.mts', '.cts', '.jsx', '.tsx',
@@ -68,6 +72,7 @@ export class VettrEngine {
 
     // Initialise AST analyser (loads WASM grammars)
     await this.astAnalyzer.init();
+    const { db: maliciousDb, info: maliciousDbInfo } = await this.loadMaliciousDb();
 
     const findings: Finding[] = [];
     let fileCount = 0;
@@ -83,6 +88,21 @@ export class VettrEngine {
 
     const excludedPaths: string[] = [];
     const files = await this.collectFiles(resolvedPath, tools, undefined, ignorePatterns, excludedPaths);
+    const activeShrinkwrapDirs = new Set<string>();
+    for (const file of files) {
+      if (path.basename(file) !== 'npm-shrinkwrap.json') continue;
+      try {
+        const lock = JSON.parse(await tools.readFile(file)) as Record<string, unknown> | null;
+        // npm 4 shrinkwraps have no lockfileVersion, only a dependencies tree.
+        const isLockfile = !!lock && typeof lock === 'object' && (typeof lock.lockfileVersion === 'number' ||
+          (!!lock.dependencies && typeof lock.dependencies === 'object'));
+        if (isLockfile) {
+          activeShrinkwrapDirs.add(path.dirname(file));
+        }
+      } catch {
+        // An unreadable or invalid shrinkwrap does not replace package-lock.json.
+      }
+    }
     if (excludedPaths.length > 0) {
       findings.push({
         id: crypto.randomBytes(8).toString('hex'),
@@ -155,7 +175,7 @@ export class VettrEngine {
           if (pkg && typeof pkg === 'object' && path.basename(file) === 'package.json') {
             manifests[path.dirname(file)] = pkg as RootManifest;
           }
-          const depFindings = this.dependencyAnalyzer.analyze(pkg, resolvedPath, this.config);
+          const depFindings = this.dependencyAnalyzer.analyze(pkg, resolvedPath, this.config, maliciousDb);
           findings.push(...depFindings);
         } catch {
           findings.push({
@@ -166,6 +186,18 @@ export class VettrEngine {
             file,
             evidence: truncateEvidence(content, 50),
           });
+        }
+      }
+
+      // npm ignores package-lock.json when a valid npm-shrinkwrap.json sits next to it.
+      const shadowedLock = path.basename(file) === 'package-lock.json' &&
+        activeShrinkwrapDirs.has(path.dirname(file));
+      if (maliciousDb && LOCKFILE_NAMES.has(path.basename(file)) && !shadowedLock) {
+        try {
+          const lock = JSON.parse(content) as Record<string, never>;
+          findings.push(...this.dependencyAnalyzer.analyzeLockfile(lock, file, maliciousDb));
+        } catch {
+          // A malformed lockfile has nothing to check; npm would refuse it too.
         }
       }
 
@@ -204,11 +236,37 @@ export class VettrEngine {
         fileCount,
         totalLines,
         checksumSha256,
+        maliciousPackagesDb: maliciousDbInfo,
       },
       recommendation: this.getRecommendation(riskScore, findings),
       vettedAt: new Date().toISOString(),
       vettrVersion: VERSION,
     };
+  }
+
+  private async loadMaliciousDb(): Promise<{ db: MaliciousPackagesIndex | null; info: MaliciousPackagesDbInfo }> {
+    const dbPath = this.config.maliciousPackagesDbPath;
+    if (!dbPath) return { db: null, info: { status: 'disabled' } };
+    try {
+      const db = await loadMaliciousPackagesIndex(dbPath);
+      if (!db) return { db: null, info: { status: 'not-synced' } };
+      const maxAge = this.config.maliciousPackagesMaxAgeHours ?? DEFAULT_MALICIOUS_DB_MAX_AGE_HOURS;
+      return {
+        db,
+        info: {
+          status: 'loaded',
+          commit: db.commit,
+          syncedAt: db.syncedAt,
+          advisoryCount: db.advisoryCount,
+          stale: indexAgeHours(db) > maxAge,
+        },
+      };
+    } catch (err) {
+      return {
+        db: null,
+        info: { status: 'invalid', error: truncateEvidence(err instanceof Error ? err.message : String(err), 200) },
+      };
+    }
   }
 
   private async collectFiles(

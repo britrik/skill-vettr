@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { DependencyAnalyzer } from '../analyzers/dependency-analyzer.js';
 import { VettingConfig } from '../types.js';
+import { MaliciousPackagesIndex } from '../utils/malicious-db.js';
 
 const BASE_CONFIG: VettingConfig = {
   maxNetworkCalls: 5,
@@ -79,5 +80,121 @@ describe('DependencyAnalyzer', () => {
     const pkg = { dependencies: { lodash: '^4.17.21', express: '^4.18.0' } };
     const findings = analyzer.analyze(pkg, '/test', BASE_CONFIG);
     assert.equal(findings.length, 0);
+  });
+});
+
+describe('DependencyAnalyzer with the OpenSSF malicious-packages index', () => {
+  const analyzer = new DependencyAnalyzer();
+  const db: MaliciousPackagesIndex = {
+    schema: 1,
+    source: 'test',
+    commit: 'abc',
+    syncedAt: new Date().toISOString(),
+    advisoryCount: 3,
+    packages: {
+      'evil-pkg': { ids: ['MAL-2024-0001'], all: true },
+      'hijacked': { ids: ['MAL-2024-0002'], versions: ['1.2.3'] },
+    },
+  };
+
+  it('flags a fully malicious package as CRITICAL with its advisory id', () => {
+    const findings = analyzer.analyze({ dependencies: { 'evil-pkg': '^1.0.0' } }, '/test', BASE_CONFIG, db);
+    const f = findings.find((x) => x.message.includes('OpenSSF'));
+    assert.equal(f?.severity, 'CRITICAL');
+    assert.match(f?.message ?? '', /MAL-2024-0001/);
+    assert.equal(f?.cwe, 'CWE-506');
+  });
+
+  it('flags a range that can resolve to a malicious version as WARNING', () => {
+    const findings = analyzer.analyze({ dependencies: { hijacked: '^1.2.0' } }, '/test', BASE_CONFIG, db);
+    assert.equal(findings.find((x) => x.message.includes('OpenSSF'))?.severity, 'WARNING');
+  });
+
+  it('does not flag a safe version of a hijacked package', () => {
+    const findings = analyzer.analyze({ dependencies: { hijacked: '1.2.2' } }, '/test', BASE_CONFIG, db);
+    assert.ok(!findings.some((x) => x.message.includes('OpenSSF')));
+  });
+
+  it('resolves npm: aliases and checks optionalDependencies', () => {
+    const findings = analyzer.analyze(
+      { optionalDependencies: { innocent: 'npm:evil-pkg@^2.0.0' } },
+      '/test',
+      BASE_CONFIG,
+      db,
+    );
+    const f = findings.find((x) => x.message.includes('OpenSSF'));
+    assert.match(f?.message ?? '', /evil-pkg/);
+    assert.equal(f?.evidence, 'innocent@npm:evil-pkg@^2.0.0');
+  });
+
+  it('checks the optionalDependencies spec that overrides dependencies', () => {
+    const findings = analyzer.analyze(
+      { dependencies: { hijacked: '1.2.2' }, optionalDependencies: { hijacked: '1.2.3' } },
+      '/test',
+      BASE_CONFIG,
+      db,
+    );
+    assert.equal(findings.find((x) => x.message.includes('OpenSSF'))?.evidence, 'hijacked@1.2.3');
+  });
+
+  it('skips git and file specs', () => {
+    const findings = analyzer.analyze(
+      { dependencies: { 'evil-pkg': 'github:someone/evil-pkg', hijacked: 'file:../hijacked' } },
+      '/test',
+      BASE_CONFIG,
+      db,
+    );
+    assert.ok(!findings.some((x) => x.message.includes('OpenSSF')));
+  });
+
+  it('keeps the built-in list when the dataset is not synced', () => {
+    const findings = analyzer.analyze({ dependencies: { 'event-stream': '3.3.6' } }, '/test', BASE_CONFIG, null);
+    assert.ok(findings.some((x) => x.message === 'Blocked dependency: event-stream'));
+  });
+
+  it('checks every package in a v3 lockfile', () => {
+    const lock = {
+      lockfileVersion: 3,
+      packages: {
+        '': { name: 'skill' },
+        'node_modules/ok': { version: '1.0.0' },
+        'node_modules/ok/node_modules/hijacked': { version: '1.2.3' },
+        'node_modules/alias': { name: 'evil-pkg', version: '0.0.1' },
+      },
+    };
+    const findings = analyzer.analyzeLockfile(lock, '/test/package-lock.json', db);
+    assert.deepEqual(findings.map((f) => f.evidence).sort(), ['evil-pkg@0.0.1', 'hijacked@1.2.3']);
+    assert.ok(findings.every((f) => f.severity === 'CRITICAL' && f.file === '/test/package-lock.json'));
+  });
+
+  it('skips lockfile packages installed from local tarballs, links or git', () => {
+    const lock = {
+      lockfileVersion: 3,
+      packages: {
+        'node_modules/hijacked': { version: '1.2.3', resolved: 'file:vendor/hijacked-1.2.3.tgz' },
+        'node_modules/evil-pkg': { version: '0.0.1', resolved: 'git+ssh://git@github.com/me/evil-pkg.git#abc' },
+        'node_modules/linked': { name: 'evil-pkg', resolved: 'packages/evil', link: true },
+      },
+      dependencies: { hijacked: { version: '1.2.3', resolved: 'file:vendor/hijacked-1.2.3.tgz' } },
+    };
+    assert.deepEqual(analyzer.analyzeLockfile(lock, '/test/package-lock.json', db), []);
+  });
+
+  it('keeps lockfile entries resolved to registry-relative tarball paths', () => {
+    const lock = { lockfileVersion: 1, dependencies: { hijacked: { version: '1.2.3', resolved: '/hijacked/-/hijacked-1.2.3.tgz' } } };
+    assert.equal(analyzer.analyzeLockfile(lock, '/test/package-lock.json', db).length, 1);
+  });
+
+  it('checks nested v1 lockfile dependencies and aliases', () => {
+    const lock = {
+      lockfileVersion: 1,
+      dependencies: {
+        ok: { version: '1.0.0', dependencies: { hijacked: { version: '1.2.3' } } },
+        alias: { version: 'npm:evil-pkg@0.0.1' },
+        safe: { version: '1.2.3' },
+      },
+    };
+    const findings = analyzer.analyzeLockfile(lock, '/test/package-lock.json', db);
+    assert.deepEqual(findings.map((f) => f.evidence).sort(), ['evil-pkg@0.0.1', 'hijacked@1.2.3']);
   });
 });

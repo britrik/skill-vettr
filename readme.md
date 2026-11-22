@@ -1,4 +1,4 @@
-# skill-vettr v2.0.8
+# skill-vettr v2.1.0
 
 Static analysis security scanner for OpenClaw skills. Analyses code before installation to detect common threats.
 
@@ -20,7 +20,7 @@ skill-vettr scans a skill's source code, dependencies, and metadata for security
 - **tree-sitter AST parsing** for structural code analysis (eval, exec, spawn, dynamic require, prototype pollution, etc.)
 - **Type-aware rules** ([ts-morph](https://github.com/dsherret/ts-morph), one in-memory project per scan): untrusted input reaching child processes, filesystem writes or network requests, and imports that don't resolve or aren't declared in `package.json`
 - **Regex patterns** for things AST can't detect (prompt injection, homoglyph attacks, encoded function names)
-- **Dependency analysis** for known malicious packages, suspicious prefixes, lifecycle scripts
+- **Dependency analysis** for known malicious packages (the [OpenSSF malicious-packages](https://github.com/ossf/malicious-packages) dataset plus a built-in list), suspicious prefixes, lifecycle scripts
 - **Metadata analysis** for typosquatting (Levenshtein distance), dangerous permissions, blocked authors
 
 ## What It Doesn't Do
@@ -31,7 +31,8 @@ This is a heuristic scanner. It has inherent limitations:
 - AST queries can be evaded by sufficiently motivated attackers (e.g., multi-stage string construction)
 - Only scans JS/TS code files — binary payloads, images, and other non-text files are skipped
 - Does not sandbox or execute the target skill
-- Malicious package lists are small and non-exhaustive
+- The OpenSSF dataset only covers packages someone has reported, and is only as fresh as your last `/skill:vet-sync`; until the first sync, only the small built-in list is checked
+- Malicious-package matching covers npm `MAL-` advisories, not ordinary vulnerabilities (CVE/GHSA)
 
 For high-security environments, combine with sandboxing and manual review.
 
@@ -64,6 +65,22 @@ The `/skill:vet` command (local path) requires only `node`. Ensure external bina
 /skill:vet-clawhub --skill some-skill-name
 ```
 
+**Refresh the malicious-packages dataset:**
+```
+/skill:vet-sync
+```
+
+## Malicious-package dataset
+
+`/skill:vet-sync` downloads the [OpenSSF malicious-packages](https://github.com/ossf/malicious-packages) repository as one tarball from `codeload.github.com` (about 50 MB), keeps only the npm `MAL-` advisories (withdrawn ones are dropped), and writes a compact index (about 15 MB) to `~/.openclaw/skill-vettr/malicious-packages-npm.json`. Scans then read that file and need no network.
+
+Each scan checks `dependencies`, `devDependencies` and `optionalDependencies` in every `package.json` (resolving `npm:` aliases), and every package pinned in `package-lock.json` or `npm-shrinkwrap.json`:
+
+- **CRITICAL**: the package is malicious in every version, or the declared or locked version is listed as malicious.
+- **WARNING**: a declared range (or a dist-tag such as `latest`) can resolve to a listed malicious version.
+
+Every report records which dataset it used (`metadata.maliciousPackagesDb`: the upstream commit, sync time, advisory count, and whether it is older than `maliciousPackagesMaxAgeHours`), so a result can be reproduced against the same dataset. The built-in list (`event-stream`, `flatmap-stream`) is still checked, with or without the dataset.
+
 ## Configuration
 
 Add to `~/.openclaw/config.json`:
@@ -78,7 +95,8 @@ Add to `~/.openclaw/config.json`:
     "allowedHosts": ["api.openai.com", "api.anthropic.com", "registry.npmjs.org"],
     "blockedAuthors": [],
     "blockedPackages": [],
-    "typosquatTargets": ["my-important-skill"]
+    "typosquatTargets": ["my-important-skill"],
+    "maliciousPackagesAutoSync": false
   }
 }
 ```
@@ -93,6 +111,10 @@ Add to `~/.openclaw/config.json`:
 | `blockedAuthors` | [] | Author names to block outright |
 | `blockedPackages` | [] | npm package names to block (merged with built-in list) |
 | `typosquatTargets` | [] | Skill names to check for typosquatting similarity |
+| `maliciousPackagesDbPath` | `~/.openclaw/skill-vettr/malicious-packages-npm.json` | Where `/skill:vet-sync` writes the OpenSSF index; `""` turns the check off |
+| `maliciousPackagesAutoSync` | false | Sync before vetting when the index is missing or older than `maliciousPackagesRefreshHours` |
+| `maliciousPackagesRefreshHours` | `maliciousPatternsRefreshHours` (24) | Index age that triggers an automatic sync |
+| `maliciousPackagesMaxAgeHours` | 168 | Index age at which reports mark the dataset stale |
 | `typeAwareMaxFiles` | 200 | Skip the type-aware rules (one INFO finding) above this many code files |
 | `typeAwareMaxBytes` | 2000000 | Skip the type-aware rules (one INFO finding) above this many bytes of code |
 

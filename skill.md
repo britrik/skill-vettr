@@ -1,7 +1,7 @@
 ---
 name: vettr
-description: "Static analysis scanner for third-party OpenClaw skills. Parses JS/TS with tree-sitter to flag eval/exec/spawn and obfuscation, traces command/hook handler input to child_process, fs-write and network calls with ts-morph, flags unresolved or undeclared imports, checks package.json dependencies and lifecycle scripts, checks manifest metadata for typosquatted or blocked names, matches prompt-injection and credential-path patterns in every scanned text file (code, Markdown, JSON, YAML, TXT; prompt-injection checks include code comments), and lists literal fetch() URLs. Optional autoVet (off by default) hooks skill:pre-install and can block an install or ask the user to approve it. Local scans need no network; /skill:vet-url downloads over HTTPS (public hosts only) and /skill:vet-clawhub runs the clawhub CLI. Use when vetting a skill before installing it."
-version: "2.0.8"
+description: "Static analysis scanner for third-party OpenClaw skills. Parses JS/TS with tree-sitter to flag eval/exec/spawn and obfuscation, traces command/hook handler input to child_process, fs-write and network calls with ts-morph, flags unresolved or undeclared imports, checks package.json and package-lock.json dependencies against the OpenSSF malicious-packages dataset and for lifecycle scripts, checks manifest metadata for typosquatted or blocked names, matches prompt-injection and credential-path patterns in every scanned text file (code, Markdown, JSON, YAML, TXT; prompt-injection checks include code comments), and lists literal fetch() URLs. Optional autoVet (off by default) hooks skill:pre-install and can block an install or ask the user to approve it. Local scans need no network; /skill:vet-sync downloads the OpenSSF dataset from codeload.github.com, /skill:vet-url downloads over HTTPS (public hosts only) and /skill:vet-clawhub runs the clawhub CLI. Use when vetting a skill before installing it."
+version: "2.1.0"
 author: britrik
 tags: ["security", "scanner", "vetting", "analysis", "static-analysis"]
 metadata:
@@ -24,7 +24,7 @@ metadata:
       loads and registers commands regardless of their presence.
 ---
 
-# skill-vettr v2.0.8
+# skill-vettr v2.1.0
 
 Security scanner for third-party OpenClaw skills. Analyses source code, dependencies, and metadata before installation using tree-sitter AST parsing and regex pattern matching.
 
@@ -56,7 +56,9 @@ The `/skill:vet` command (local path vetting) requires only `node` and no extern
 |------------|---------|-------|
 | Read files | all commands | The skill directory being vetted (allowed roots only) |
 | Write files | `vet-url`, `vet-clawhub` | A fresh temp directory, deleted after the scan |
+| Write files | `vet-sync` | `~/.openclaw/skill-vettr/malicious-packages-npm.json` (mode 0600) and a temp directory deleted after the sync |
 | Network | `vet-url`, `vet-clawhub` | HTTPS to public hosts only; none for `/skill:vet` |
+| Network | `vet-sync` | HTTPS to `codeload.github.com` only (also before vetting when `maliciousPackagesAutoSync` is on) |
 | Subprocesses | `vet-url`, `vet-clawhub` | `git`, `tar`, `clawhub` via `execFile` (no shell) |
 
 The skill never reads credentials; credential paths such as `~/.ssh` appear in its source only as detection patterns.
@@ -66,6 +68,7 @@ The skill never reads credentials; credential paths such as `~/.ssh` appear in i
 - `/skill:vet --path <directory>` — Vet a local skill directory
 - `/skill:vet-url --url <https://...>` — Download and vet from URL
 - `/skill:vet-clawhub --skill <slug>` — Fetch and vet from ClawHub
+- `/skill:vet-sync` — Download the OpenSSF malicious-packages dataset for offline matching
 
 ## Detection Categories
 
@@ -82,7 +85,8 @@ The skill never reads credentials; credential paths such as `~/.ssh` appear in i
 | Network calls | AST | fetch() with literal URLs (checked against allowlist) |
 | Tainted sinks | ts-morph | Command/hook handler arguments or process.argv reaching exec/spawn (CRITICAL), fs writes or fetch/http (WARNING), with the flow as evidence |
 | Unresolved imports | ts-morph | Relative imports to missing files, bare imports not declared in package.json |
-| Malicious deps | Config | Known bad packages, lifecycle scripts, git/http deps |
+| Malicious deps | OpenSSF dataset | npm `MAL-` advisories matched against package.json ranges and lockfile versions |
+| Risky deps | Config | Built-in and blocked packages, lifecycle scripts, git/http deps |
 | Typosquatting | Levenshtein | Skill names within edit distance 2 of targets |
 | Dangerous permissions | Config | shell:exec, credentials:read in SKILL.md |
 
@@ -95,6 +99,7 @@ The skill never reads credentials; credential paths such as `~/.ssh` appear in i
 - **JS/TS only** — Binary payloads, images, and non-text files are skipped
 - **Limited network detection** — Only detects `fetch()` with literal URL strings; misses axios, http module, dynamic URLs
 - **No sandboxing** — Does not execute or isolate target code
+- **Malicious-package coverage** — Only reported npm packages in the OpenSSF dataset, as of the last `/skill:vet-sync`; not CVE/GHSA vulnerabilities. Reports show the dataset commit and flag it when stale
 - **Comment scanning** — Prompt injection detection scans string literals, not comments
 - **Filesystem scope** — `vet-url` downloads and extracts remote archives into a temp directory; `vet` accepts paths under `os.tmpdir()`, `~/.openclaw`, and `~/Downloads` by default. Set `allowCwd: true` in config to also permit `process.cwd()` (see Configuration below)
 - **Network scope** — `vet-url` only connects to hosts whose DNS answers are all public unicast addresses; loopback, private, link-local and cloud-metadata ranges are refused, every redirect is re-validated, and the connection is pinned to the checked address. Git clones run with redirects disabled and HTTPS as the only allowed protocol
@@ -121,6 +126,14 @@ To allow vetting paths under the current working directory, set `allowCwd: true`
 ```
 
 > ⚠️ **Security implication:** Enabling `allowCwd` means the scanner will accept any path under the directory you launched it from. If you run from `/` or `$HOME`, this effectively grants access to your entire filesystem. Only enable this when running from a scoped project directory or inside a container.
+
+### Malicious-package dataset
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `maliciousPackagesDbPath` | `~/.openclaw/skill-vettr/malicious-packages-npm.json` | Index written by `/skill:vet-sync`; `""` turns the check off |
+| `maliciousPackagesAutoSync` | false | Sync before vetting when the index is missing or older than `maliciousPackagesRefreshHours` (24) |
+| `maliciousPackagesMaxAgeHours` | 168 | Reports mark the dataset stale after this many hours |
 
 ### Type-aware analysis limits
 

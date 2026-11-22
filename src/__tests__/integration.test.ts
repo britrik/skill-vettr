@@ -97,6 +97,19 @@ const tools: ToolsInterface = {
   },
 };
 
+async function writeHijackedDb(dir: string): Promise<string> {
+  const dbPath = path.join(dir, 'hijacked-db.json');
+  await fs.writeFile(dbPath, JSON.stringify({
+    schema: 1,
+    source: 'ossf/malicious-packages',
+    commit: 'c504f23264a165b3c11afb5c71429bc8bcbf2f49',
+    syncedAt: new Date().toISOString(),
+    advisoryCount: 1,
+    packages: { hijacked: { ids: ['MAL-2024-0002'], versions: ['1.2.3'] } },
+  }));
+  return dbPath;
+}
+
 describe('VettrEngine integration', () => {
   it('passes a safe skill with low risk score', async () => {
     const engine = new VettrEngine(config);
@@ -106,7 +119,7 @@ describe('VettrEngine integration', () => {
     assert.ok(report.riskScore < 20, `Expected low risk, got ${report.riskScore}`);
     assert.ok(['SAFE', 'LOW'].includes(report.riskLevel), `Expected SAFE or LOW, got ${report.riskLevel}`);
     assert.equal(report.recommendation, 'INSTALL');
-    assert.equal(report.vettrVersion, '2.0.8');
+    assert.equal(report.vettrVersion, '2.1.0');
     assert.ok(report.metadata.checksumSha256);
     assert.ok(report.metadata.fileCount >= 2);
   });
@@ -284,6 +297,101 @@ describe('VettrEngine integration', () => {
       shellFindings.length > 0,
       'Without .vettrignore, vendor/bad.ts should produce SHELL_INJECTION findings',
     );
+  });
+});
+
+describe('VettrEngine with the OpenSSF malicious-packages index', () => {
+  it('reports the dataset as disabled when no path is configured', async () => {
+    const report = await new VettrEngine(config).vetSkill(path.join(tempFixturesDir, 'safe-skill'), tools);
+    assert.deepEqual(report.metadata.maliciousPackagesDb, { status: 'disabled' });
+  });
+
+  it('reports a configured but unsynced dataset without failing the scan', async () => {
+    const engine = new VettrEngine({ ...config, maliciousPackagesDbPath: path.join(tempFixturesDir, 'missing.json') });
+    const report = await engine.vetSkill(path.join(tempFixturesDir, 'safe-skill'), tools);
+    assert.equal(report.metadata.maliciousPackagesDb?.status, 'not-synced');
+    assert.equal(report.recommendation, 'INSTALL');
+  });
+
+  it('blocks a skill whose manifest or lockfile pulls a malicious package', async () => {
+    const skillDir = path.join(tempFixturesDir, 'openssf-skill');
+    await copyDir(path.join(tempFixturesDir, 'safe-skill'), skillDir);
+    await fs.writeFile(
+      path.join(skillDir, 'package.json'),
+      JSON.stringify({ name: 'hello-world', version: '1.0.0', dependencies: { lodash: '^4.17.21', 'evil-pkg': '^1.0.0' } }),
+    );
+    await fs.writeFile(
+      path.join(skillDir, 'package-lock.json'),
+      JSON.stringify({ lockfileVersion: 3, packages: { 'node_modules/lodash/node_modules/hijacked': { version: '1.2.3' } } }),
+    );
+    const dbPath = path.join(tempFixturesDir, 'malicious-db.json');
+    const syncedAt = new Date(Date.now() - 200 * 3_600_000).toISOString();
+    await fs.writeFile(
+      dbPath,
+      JSON.stringify({
+        schema: 1,
+        source: 'ossf/malicious-packages',
+        commit: 'c504f23264a165b3c11afb5c71429bc8bcbf2f49',
+        syncedAt,
+        advisoryCount: 2,
+        packages: {
+          'evil-pkg': { ids: ['MAL-2024-0001'], all: true },
+          hijacked: { ids: ['MAL-2024-0002'], versions: ['1.2.3'] },
+        },
+      }),
+    );
+
+    const report = await new VettrEngine({ ...config, maliciousPackagesDbPath: dbPath }).vetSkill(skillDir, tools);
+
+    assert.deepEqual(report.metadata.maliciousPackagesDb, {
+      status: 'loaded',
+      commit: 'c504f23264a165b3c11afb5c71429bc8bcbf2f49',
+      syncedAt,
+      advisoryCount: 2,
+      stale: true,
+    });
+    const openssf = report.findings.filter((f) => f.message.includes('OpenSSF'));
+    assert.deepEqual(openssf.map((f) => path.basename(f.file)).sort(), ['package-lock.json', 'package.json']);
+    assert.ok(openssf.every((f) => f.severity === 'CRITICAL'));
+    assert.equal(report.recommendation, 'BLOCK');
+  });
+
+  it('checks npm-shrinkwrap.json instead of a package-lock.json next to it', async () => {
+    const skillDir = path.join(tempFixturesDir, 'shrinkwrap-skill');
+    await copyDir(path.join(tempFixturesDir, 'safe-skill'), skillDir);
+    const lock = (version: string) => JSON.stringify({ lockfileVersion: 3, packages: { 'node_modules/hijacked': { version } } });
+    await fs.writeFile(path.join(skillDir, 'package-lock.json'), lock('1.2.3'));
+    await fs.writeFile(path.join(skillDir, 'npm-shrinkwrap.json'), lock('1.2.2'));
+    const legacyDir = path.join(tempFixturesDir, 'legacy-shrinkwrap-skill');
+    await copyDir(path.join(tempFixturesDir, 'safe-skill'), legacyDir);
+    await fs.writeFile(path.join(legacyDir, 'package-lock.json'), lock('1.2.3'));
+    await fs.writeFile(path.join(legacyDir, 'npm-shrinkwrap.json'), JSON.stringify({ dependencies: { hijacked: { version: '1.2.2' } } }));
+    const legacy = await new VettrEngine({ ...config, maliciousPackagesDbPath: await writeHijackedDb(legacyDir) })
+      .vetSkill(legacyDir, tools);
+    assert.ok(!legacy.findings.some((f) => f.message.includes('OpenSSF')));
+
+    await fs.writeFile(path.join(legacyDir, 'package-lock.json'), lock('1.2.2'));
+    await fs.writeFile(path.join(legacyDir, 'npm-shrinkwrap.json'), JSON.stringify({ dependencies: { hijacked: { version: '1.2.3' } } }));
+    const flagged = await new VettrEngine({ ...config, maliciousPackagesDbPath: await writeHijackedDb(legacyDir) })
+      .vetSkill(legacyDir, tools);
+    const hits = flagged.findings.filter((f) => f.message.includes('OpenSSF'));
+    assert.deepEqual(hits.map((f) => path.basename(f.file)), ['npm-shrinkwrap.json']);
+    const report = await new VettrEngine({ ...config, maliciousPackagesDbPath: await writeHijackedDb(skillDir) })
+      .vetSkill(skillDir, tools);
+    assert.ok(!report.findings.some((f) => f.message.includes('OpenSSF')));
+  });
+
+  it('still checks package-lock.json when npm-shrinkwrap.json next to it is not a lockfile', async () => {
+    const skillDir = path.join(tempFixturesDir, 'empty-shrinkwrap-skill');
+    await copyDir(path.join(tempFixturesDir, 'safe-skill'), skillDir);
+    await fs.writeFile(
+      path.join(skillDir, 'package-lock.json'),
+      JSON.stringify({ lockfileVersion: 3, packages: { 'node_modules/hijacked': { version: '1.2.3' } } }),
+    );
+    await fs.writeFile(path.join(skillDir, 'npm-shrinkwrap.json'), '');
+    const report = await new VettrEngine({ ...config, maliciousPackagesDbPath: await writeHijackedDb(skillDir) })
+      .vetSkill(skillDir, tools);
+    assert.ok(report.findings.some((f) => f.message.includes('OpenSSF')));
   });
 });
 
