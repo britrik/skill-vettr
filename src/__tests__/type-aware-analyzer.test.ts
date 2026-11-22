@@ -5,16 +5,19 @@ import { TypeAwareAnalyzer, TypeAwareInput, packageNameOf } from '../analyzers/t
 const ROOT = '/skill';
 const analyzer = new TypeAwareAnalyzer();
 
-function run(files: Record<string, string>, opts: Partial<TypeAwareInput> = {}) {
+type RunOpts = Partial<TypeAwareInput> & { manifest?: TypeAwareInput['manifests'][string] | null };
+
+function run(files: Record<string, string>, opts: RunOpts = {}) {
   const codeFiles = Object.entries(files).map(([name, content]) => ({ path: `${ROOT}/${name}`, content }));
+  const { manifest = { name: 'skill', dependencies: {} }, ...rest } = opts;
   return analyzer.analyze({
     rootDir: ROOT,
     codeFiles,
     allFiles: codeFiles.map((f) => f.path),
-    manifest: { name: 'skill', dependencies: {} },
+    manifests: manifest ? { [ROOT]: manifest } : {},
     maxFiles: 50,
     maxBytes: 1_000_000,
-    ...opts,
+    ...rest,
   });
 }
 
@@ -167,7 +170,15 @@ describe('TypeAwareAnalyzer import rules', () => {
     assert.deepEqual(findings.map((f) => f.evidence), ['./missing.js', './also-missing']);
   });
 
-  it('skips the undeclared-package check without a root package.json', () => {
+  it('checks each file against the nearest package.json, e.g. inside a wrapped archive folder', () => {
+    const findings = run(
+      { 'wrapped/index.ts': "import yaml from 'yaml';\nimport axios from 'axios';", 'top.ts': "import axios from 'axios';" },
+      { manifest: null, manifests: { [`${ROOT}/wrapped`]: { dependencies: { yaml: '1' } } } },
+    );
+    assert.deepEqual(findings.map((f) => `${f.file}:${f.evidence}`), ['/skill/wrapped/index.ts:axios']);
+  });
+
+  it('skips the undeclared-package check without a package.json', () => {
     assert.deepEqual(run({ 'index.ts': "import axios from 'axios';" }, { manifest: null }), []);
   });
 

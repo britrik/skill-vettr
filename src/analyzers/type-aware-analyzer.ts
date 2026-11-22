@@ -23,8 +23,8 @@ export interface TypeAwareInput {
   codeFiles: CodeFile[];
   /** Every file path collected for the scan, used to resolve relative imports. */
   allFiles: string[];
-  /** The skill's root package.json, or null when it has none. */
-  manifest: RootManifest | null;
+  /** Every package.json in the skill, keyed by its directory; each file is checked against the nearest one. */
+  manifests: Record<string, RootManifest>;
   maxFiles: number;
   maxBytes: number;
 }
@@ -155,13 +155,28 @@ export class TypeAwareAnalyzer {
   private checkImports(sourceFiles: SourceFile[], input: TypeAwareInput): Finding[] {
     const findings: Finding[] = [];
     const existing = new Set(input.allFiles.map((f) => path.resolve(f)));
-    const declared = new Set<string>([
-      ...Object.keys(input.manifest?.dependencies ?? {}),
-      ...Object.keys(input.manifest?.devDependencies ?? {}),
-      ...Object.keys(input.manifest?.peerDependencies ?? {}),
-      ...Object.keys(input.manifest?.optionalDependencies ?? {}),
-    ]);
-    if (input.manifest?.name) declared.add(input.manifest.name);
+    const declaredFor = new Map<string, Set<string> | null>();
+    const declaredNear = (file: string): Set<string> | null => {
+      const dir = path.dirname(file);
+      if (declaredFor.has(dir)) return declaredFor.get(dir)!;
+      let found: Set<string> | null = null;
+      for (let d = dir; ; d = path.dirname(d)) {
+        const m = Object.hasOwn(input.manifests, d) ? input.manifests[d] : undefined;
+        if (m) {
+          found = new Set([
+            ...Object.keys(m.dependencies ?? {}),
+            ...Object.keys(m.devDependencies ?? {}),
+            ...Object.keys(m.peerDependencies ?? {}),
+            ...Object.keys(m.optionalDependencies ?? {}),
+            ...(m.name ? [m.name] : []),
+          ]);
+          break;
+        }
+        if (d === path.dirname(d) || d === path.resolve(input.rootDir)) break;
+      }
+      declaredFor.set(dir, found);
+      return found;
+    };
 
     for (const sf of sourceFiles) {
       if (sf.isDeclarationFile()) continue;
@@ -175,7 +190,8 @@ export class TypeAwareAnalyzer {
         // `#name` imports map through package.json "imports", not dependencies.
         if (spec.startsWith('#')) continue;
         if (spec.startsWith('node:') || BUILTINS.has(spec) || BUILTINS.has(spec.split('/')[0]!)) continue;
-        if (input.manifest === null) continue;
+        const declared = declaredNear(sf.getFilePath());
+        if (declared === null) continue;
         const pkg = packageNameOf(spec);
         if (!declared.has(pkg) && !HOST_PROVIDED.has(pkg)) {
           findings.push(importFinding(sf.getFilePath(), line, spec, `Import of undeclared package: ${pkg}`));

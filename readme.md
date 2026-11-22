@@ -106,7 +106,7 @@ After the per-file scan, skill-vettr loads every code file into one in-memory ts
 | Untrusted input reaches an `fs` write path (`writeFile`, `appendFile`, `createWriteStream`, `rm`, `unlink` and their sync forms) | WARNING | PATH_TRAVERSAL | CWE-22 |
 | Untrusted input reaches `fetch` or `http`/`https` `request`/`get` | WARNING | NETWORK_RISK | CWE-918 |
 | Relative import that doesn't resolve to a file in the skill | WARNING | DEPENDENCY_RISK | CWE-829 |
-| Bare import of a package missing from the root `package.json` (`dependencies`, `devDependencies`, `peerDependencies`, `optionalDependencies`; built-ins and `@openclaw/sdk` are exempt) | WARNING | DEPENDENCY_RISK | CWE-829 |
+| Bare import of a package missing from the nearest `package.json` (`dependencies`, `devDependencies`, `peerDependencies`, `optionalDependencies`; built-ins and `@openclaw/sdk` are exempt) | WARNING | DEPENDENCY_RISK | CWE-829 |
 
 Untrusted input is the parameters of handlers passed to `*.commands.register(name, handler)` and `*.hooks.on(name, handler)`, and `process.argv`. Taint follows assignments, destructuring, property access, template literals, concatenation, `String()`, `JSON.stringify()`, `path.join()`/`path.resolve()`, common string methods, and arguments passed to functions declared in the skill. The evidence shows the flow, e.g. `args -> args.path -> cmd -> exec(...)`.
 

@@ -95,8 +95,7 @@ export class VettrEngine {
     }
 
     const codeFiles: CodeFile[] = [];
-    let rootManifest: RootManifest | null = null;
-    const rootPackageJson = path.join(resolvedPath, 'package.json');
+    const manifests: Record<string, RootManifest> = {};
 
     for (const file of files) {
       if (file.includes('node_modules')) continue;
@@ -153,7 +152,7 @@ export class VettrEngine {
       if (file.endsWith('package.json')) {
         try {
           const pkg = JSON.parse(content) as Record<string, unknown>;
-          if (file === rootPackageJson) rootManifest = pkg as RootManifest;
+          if (pkg && typeof pkg === 'object') manifests[path.dirname(file)] = pkg as RootManifest;
           const depFindings = this.dependencyAnalyzer.analyze(pkg, resolvedPath, this.config);
           findings.push(...depFindings);
         } catch {
@@ -180,7 +179,7 @@ export class VettrEngine {
       rootDir: resolvedPath,
       codeFiles,
       allFiles: files,
-      manifest: rootManifest,
+      manifests,
       maxFiles: this.config.typeAwareMaxFiles ?? DEFAULT_TYPE_AWARE_MAX_FILES,
       maxBytes: this.config.typeAwareMaxBytes ?? DEFAULT_TYPE_AWARE_MAX_BYTES,
     }));
