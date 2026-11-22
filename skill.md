@@ -1,6 +1,6 @@
 ---
 name: vettr
-description: "Static analysis scanner for third-party OpenClaw skills. Parses JS/TS with tree-sitter to flag eval/exec/spawn and obfuscation, checks package.json dependencies and lifecycle scripts, checks manifest metadata for typosquatted or blocked names, matches prompt-injection and credential-path patterns in every scanned text file (code, Markdown, JSON, YAML, TXT; prompt-injection checks include code comments), and lists literal fetch() URLs. Optional autoVet (off by default) hooks skill:pre-install and can block an install or ask the user to approve it. Local scans need no network; /skill:vet-url downloads over HTTPS (public hosts only) and /skill:vet-clawhub runs the clawhub CLI. Use when vetting a skill before installing it."
+description: "Static analysis scanner for third-party OpenClaw skills. Parses JS/TS with tree-sitter to flag eval/exec/spawn and obfuscation, traces command/hook handler input to child_process, fs-write and network calls with ts-morph, flags unresolved or undeclared imports, checks package.json dependencies and lifecycle scripts, checks manifest metadata for typosquatted or blocked names, matches prompt-injection and credential-path patterns in every scanned text file (code, Markdown, JSON, YAML, TXT; prompt-injection checks include code comments), and lists literal fetch() URLs. Optional autoVet (off by default) hooks skill:pre-install and can block an install or ask the user to approve it. Local scans need no network; /skill:vet-url downloads over HTTPS (public hosts only) and /skill:vet-clawhub runs the clawhub CLI. Use when vetting a skill before installing it."
 version: "2.0.8"
 author: britrik
 tags: ["security", "scanner", "vetting", "analysis", "static-analysis"]
@@ -80,6 +80,8 @@ The skill never reads credentials; credential paths such as `~/.ssh` appear in i
 | Encoded names | Regex | Unicode/hex-escaped "eval", "exec" |
 | Credential paths | Regex | Cloud and SSH credential directory references, system credential store access |
 | Network calls | AST | fetch() with literal URLs (checked against allowlist) |
+| Tainted sinks | ts-morph | Command/hook handler arguments or process.argv reaching exec/spawn (CRITICAL), fs writes or fetch/http (WARNING), with the flow as evidence |
+| Unresolved imports | ts-morph | Relative imports to missing files, bare imports not declared in package.json |
 | Malicious deps | Config | Known bad packages, lifecycle scripts, git/http deps |
 | Typosquatting | Levenshtein | Skill names within edit distance 2 of targets |
 | Dangerous permissions | Config | shell:exec, credentials:read in SKILL.md |
@@ -119,6 +121,10 @@ To allow vetting paths under the current working directory, set `allowCwd: true`
 ```
 
 > ⚠️ **Security implication:** Enabling `allowCwd` means the scanner will accept any path under the directory you launched it from. If you run from `/` or `$HOME`, this effectively grants access to your entire filesystem. Only enable this when running from a scoped project directory or inside a container.
+
+### Type-aware analysis limits
+
+`typeAwareMaxFiles` (default 200) and `typeAwareMaxBytes` (default 2000000) cap the code loaded into the in-memory ts-morph project. Above either, the type-aware rules are skipped and the report gets one INFO finding saying so.
 
 ## `.vettrignore`
 

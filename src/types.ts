@@ -69,6 +69,10 @@ export interface VettingConfig {
   blockedPackages?: string[];
   typosquatTargets?: string[];
   allowCwd?: boolean;
+  /** Skip type-aware analysis (one INFO finding) above this many code files. Defaults to 200. */
+  typeAwareMaxFiles?: number;
+  /** Skip type-aware analysis (one INFO finding) above this many bytes of code. Defaults to 2 MB. */
+  typeAwareMaxBytes?: number;
   /** Honour a .vettrignore shipped inside the scanned skill. Off by default: the scanned skill controls that file. */
   trustVettrignore?: boolean;
 }
