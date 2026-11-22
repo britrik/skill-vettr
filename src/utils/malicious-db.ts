@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -286,7 +287,7 @@ export async function syncMaliciousPackages(opts: SyncOptions = {}): Promise<Mal
     const index = await buildIndexFromTarball(tarball);
 
     await fs.promises.mkdir(path.dirname(dbPath), { recursive: true, mode: 0o700 });
-    const tmpPath = `${dbPath}.${process.pid}.tmp`;
+    const tmpPath = `${dbPath}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`;
     await fs.promises.writeFile(tmpPath, JSON.stringify(index), { mode: 0o600 });
     await fs.promises.rename(tmpPath, dbPath);
     return index;
