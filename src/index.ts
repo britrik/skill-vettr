@@ -35,7 +35,6 @@ const DEFAULT_CONFIG: VettingConfig = {
   maliciousPatternsRefreshHours: 24,
   maliciousPackagesDbPath: DEFAULT_MALICIOUS_PACKAGES_DB_PATH,
   maliciousPackagesAutoSync: false,
-  maliciousPackagesRefreshHours: 24,
   maliciousPackagesMaxAgeHours: 168,
   blockedAuthors: [],
   blockedPackages: [],

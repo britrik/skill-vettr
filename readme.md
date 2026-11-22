@@ -112,7 +112,7 @@ Add to `~/.openclaw/config.json`:
 | `typosquatTargets` | [] | Skill names to check for typosquatting similarity |
 | `maliciousPackagesDbPath` | `~/.openclaw/skill-vettr/malicious-packages-npm.json` | Where `/skill:vet-sync` writes the OpenSSF index; `""` turns the check off |
 | `maliciousPackagesAutoSync` | false | Sync before vetting when the index is missing or older than `maliciousPackagesRefreshHours` |
-| `maliciousPackagesRefreshHours` | 24 | Index age that triggers an automatic sync |
+| `maliciousPackagesRefreshHours` | `maliciousPatternsRefreshHours` (24) | Index age that triggers an automatic sync |
 | `maliciousPackagesMaxAgeHours` | 168 | Index age at which reports mark the dataset stale |
 
 ## Risk Levels
