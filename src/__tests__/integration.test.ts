@@ -306,4 +306,14 @@ describe('VettrEngine type-aware analysis', () => {
     assert.equal(f?.evidence, 'args -> args.msg -> run(...)');
     assert.equal(f?.line, 2);
   });
+
+  it('reads dependencies only from files named package.json', async () => {
+    const skillDir = path.join(tempFixturesDir, 'manifest-lookalike-skill');
+    await copyDir(path.join(tempFixturesDir, 'safe-skill'), skillDir);
+    await fs.writeFile(path.join(skillDir, 'package.json'), JSON.stringify({ name: 'm', dependencies: { yaml: '2.0.0' } }));
+    await fs.writeFile(path.join(skillDir, 'zz-backup-package.json'), JSON.stringify({ name: 'm', dependencies: {} }));
+    await fs.writeFile(path.join(skillDir, 'index.ts'), "import yaml from 'yaml';\nexport default yaml;\n");
+    const report = await new VettrEngine(config).vetSkill(skillDir, tools);
+    assert.ok(!report.findings.some((f) => f.message.startsWith('Import of undeclared package')));
+  });
 });

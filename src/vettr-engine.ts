@@ -152,7 +152,9 @@ export class VettrEngine {
       if (file.endsWith('package.json')) {
         try {
           const pkg = JSON.parse(content) as Record<string, unknown>;
-          if (pkg && typeof pkg === 'object') manifests[path.dirname(file)] = pkg as RootManifest;
+          if (pkg && typeof pkg === 'object' && path.basename(file) === 'package.json') {
+            manifests[path.dirname(file)] = pkg as RootManifest;
+          }
           const depFindings = this.dependencyAnalyzer.analyze(pkg, resolvedPath, this.config);
           findings.push(...depFindings);
         } catch {
