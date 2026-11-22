@@ -115,6 +115,13 @@ describe('TypeAwareAnalyzer taint rules', () => {
     assert.equal(mutated.length, 1);
   });
 
+  it('falls back to whole-object taint for computed keys', () => {
+    const findings = run({
+      'index.ts': handler("    const k = 'command';\n    const job = { command: 'ls', [k]: args.cmd };\n    exec(job.command);", "import { exec } from 'child_process';"),
+    });
+    assert.equal(findings.length, 1);
+  });
+
   it('terminates on cyclic assignments', () => {
     const findings = run({
       'index.ts': handler("    let a = args.x; let b = a; a = b; b = a;\n    exec(b);", "import { exec } from 'child_process';"),

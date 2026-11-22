@@ -356,8 +356,11 @@ class TaintPass {
     const init = decl.getInitializer();
     if (!init || !Node.isObjectLiteralExpression(init)) return undefined;
     const props = init.getProperties();
-    if (props.some((p) => Node.isSpreadAssignment(p))) return undefined;
-    for (const prop of props) {
+    const opaque = (p: Node) => Node.isSpreadAssignment(p) || Node.isGetAccessorDeclaration(p) ||
+      Node.isSetAccessorDeclaration(p) || (Node.isPropertyAssignment(p) && Node.isComputedPropertyName(p.getNameNode()));
+    if (props.some(opaque)) return undefined;
+    // The last duplicate key wins at runtime.
+    for (const prop of [...props].reverse()) {
       if (Node.isPropertyAssignment(prop) && prop.getName() === key) return this.flowOf(prop.getInitializer()!, depth + 1);
       if (Node.isShorthandPropertyAssignment(prop) && prop.getName() === key) {
         const value = this.checker.getShorthandAssignmentValueSymbol(prop.compilerNode);
