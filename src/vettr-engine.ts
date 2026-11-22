@@ -87,8 +87,11 @@ export class VettrEngine {
     for (const file of files) {
       if (path.basename(file) !== 'npm-shrinkwrap.json') continue;
       try {
-        const lock = JSON.parse(await tools.readFile(file)) as { lockfileVersion?: unknown } | null;
-        if (lock && typeof lock === 'object' && typeof lock.lockfileVersion === 'number') {
+        const lock = JSON.parse(await tools.readFile(file)) as Record<string, unknown> | null;
+        // npm 4 shrinkwraps have no lockfileVersion, only a dependencies tree.
+        const isLockfile = !!lock && typeof lock === 'object' && (typeof lock.lockfileVersion === 'number' ||
+          (!!lock.dependencies && typeof lock.dependencies === 'object'));
+        if (isLockfile) {
           activeShrinkwrapDirs.add(path.dirname(file));
         }
       } catch {
