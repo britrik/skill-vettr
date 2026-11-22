@@ -83,6 +83,18 @@ export class VettrEngine {
 
     const excludedPaths: string[] = [];
     const files = await this.collectFiles(resolvedPath, tools, undefined, ignorePatterns, excludedPaths);
+    const activeShrinkwrapDirs = new Set<string>();
+    for (const file of files) {
+      if (path.basename(file) !== 'npm-shrinkwrap.json') continue;
+      try {
+        const lock = JSON.parse(await tools.readFile(file)) as { lockfileVersion?: unknown } | null;
+        if (lock && typeof lock === 'object' && typeof lock.lockfileVersion === 'number') {
+          activeShrinkwrapDirs.add(path.dirname(file));
+        }
+      } catch {
+        // An unreadable or invalid shrinkwrap does not replace package-lock.json.
+      }
+    }
     if (excludedPaths.length > 0) {
       findings.push({
         id: crypto.randomBytes(8).toString('hex'),
@@ -162,9 +174,9 @@ export class VettrEngine {
         }
       }
 
-      // npm ignores package-lock.json when npm-shrinkwrap.json sits next to it.
+      // npm ignores package-lock.json when a valid npm-shrinkwrap.json sits next to it.
       const shadowedLock = path.basename(file) === 'package-lock.json' &&
-        files.includes(path.join(path.dirname(file), 'npm-shrinkwrap.json'));
+        activeShrinkwrapDirs.has(path.dirname(file));
       if (maliciousDb && LOCKFILE_NAMES.has(path.basename(file)) && !shadowedLock) {
         try {
           const lock = JSON.parse(content) as Record<string, never>;

@@ -353,4 +353,17 @@ describe('VettrEngine with the OpenSSF malicious-packages index', () => {
       .vetSkill(skillDir, tools);
     assert.ok(!report.findings.some((f) => f.message.includes('OpenSSF')));
   });
+
+  it('still checks package-lock.json when npm-shrinkwrap.json next to it is not a lockfile', async () => {
+    const skillDir = path.join(tempFixturesDir, 'empty-shrinkwrap-skill');
+    await copyDir(path.join(tempFixturesDir, 'safe-skill'), skillDir);
+    await fs.writeFile(
+      path.join(skillDir, 'package-lock.json'),
+      JSON.stringify({ lockfileVersion: 3, packages: { 'node_modules/hijacked': { version: '1.2.3' } } }),
+    );
+    await fs.writeFile(path.join(skillDir, 'npm-shrinkwrap.json'), '');
+    const report = await new VettrEngine({ ...config, maliciousPackagesDbPath: path.join(tempFixturesDir, 'malicious-db.json') })
+      .vetSkill(skillDir, tools);
+    assert.ok(report.findings.some((f) => f.message.includes('OpenSSF')));
+  });
 });
